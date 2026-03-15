@@ -1,0 +1,57 @@
+version: 2
+
+project_name: sonar
+
+before:
+  hooks:
+    - go vet ./...
+    - go test -short ./...
+
+builds:
+  - id: sonar
+    binary: sonar
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/samuelbailey123/sonar/internal/version.Version={{.Version}}
+      - -X github.com/samuelbailey123/sonar/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/samuelbailey123/sonar/internal/version.Date={{.Date}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: sonar
+    builds: [sonar]
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: "^feat"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^fix"
+      order: 1
+    - title: Other Changes
+      order: 999
