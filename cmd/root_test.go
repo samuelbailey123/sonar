@@ -398,126 +398,7 @@ func TestLocationString(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// normaliseRecordSet
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestNormaliseRecordSet(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		records []string
-		want    string
-	}{
-		{
-			name:    "nil input",
-			records: nil,
-			want:    "",
-		},
-		{
-			name:    "empty slice",
-			records: []string{},
-			want:    "",
-		},
-		{
-			name:    "single record",
-			records: []string{"93.184.216.34"},
-			want:    "93.184.216.34",
-		},
-		{
-			name:    "two already-sorted records",
-			records: []string{"1.2.3.4", "5.6.7.8"},
-			want:    "1.2.3.4|5.6.7.8",
-		},
-		{
-			name:    "two records reversed — same key",
-			records: []string{"5.6.7.8", "1.2.3.4"},
-			want:    "1.2.3.4|5.6.7.8",
-		},
-		{
-			name:    "three records out of order",
-			records: []string{"c", "a", "b"},
-			want:    "a|b|c",
-		},
-		{
-			name:    "duplicate records preserved",
-			records: []string{"a", "a"},
-			want:    "a|a",
-		},
-		{
-			name:    "original slice is not mutated",
-			records: []string{"z", "m", "a"},
-			want:    "a|m|z",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			// Keep a copy to verify the original is not mutated.
-			var original []string
-			if tc.records != nil {
-				original = make([]string, len(tc.records))
-				copy(original, tc.records)
-			}
-
-			got := normaliseRecordSet(tc.records)
-			if got != tc.want {
-				t.Errorf("normaliseRecordSet(%v) = %q; want %q", tc.records, got, tc.want)
-			}
-
-			// Verify input was not mutated.
-			if tc.records != nil {
-				for i, v := range tc.records {
-					if v != original[i] {
-						t.Errorf("normaliseRecordSet mutated input at index %d: got %q, want %q", i, v, original[i])
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestNormaliseRecordSet_Idempotent(t *testing.T) {
-	t.Parallel()
-
-	records := []string{"z.example.com.", "a.example.com.", "m.example.com."}
-	first := normaliseRecordSet(records)
-	second := normaliseRecordSet(records)
-	if first != second {
-		t.Errorf("normaliseRecordSet is not idempotent: first=%q second=%q", first, second)
-	}
-}
-
-func TestNormaliseRecordSet_OrderIndependence(t *testing.T) {
-	t.Parallel()
-
-	// Different orderings of the same record set must produce the same key.
-	permutations := [][]string{
-		{"alpha", "beta", "gamma"},
-		{"gamma", "alpha", "beta"},
-		{"beta", "gamma", "alpha"},
-		{"gamma", "beta", "alpha"},
-		{"alpha", "gamma", "beta"},
-		{"beta", "alpha", "gamma"},
-	}
-
-	var reference string
-	for i, perm := range permutations {
-		got := normaliseRecordSet(perm)
-		if i == 0 {
-			reference = got
-			continue
-		}
-		if got != reference {
-			t.Errorf("permutation %d produced different key: %q (reference: %q)", i, got, reference)
-		}
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// propagationStats
+// checker.PropagationStats
 // ─────────────────────────────────────────────────────────────────────────────
 
 // makeResult is a helper that constructs a query.Result for propagation tests.
@@ -532,20 +413,20 @@ func makeResult(status query.Status, records ...string) query.Result {
 func TestPropagationStats_EmptyResults(t *testing.T) {
 	t.Parallel()
 
-	pct, consensus := propagationStats(nil)
+	pct, consensus, _ := checker.PropagationStats(nil)
 	if pct != 0 {
-		t.Errorf("propagationStats(nil) pct = %f; want 0", pct)
+		t.Errorf("checker.PropagationStats(nil) pct = %f; want 0", pct)
 	}
 	if consensus != nil {
-		t.Errorf("propagationStats(nil) consensus = %v; want nil", consensus)
+		t.Errorf("checker.PropagationStats(nil) consensus = %v; want nil", consensus)
 	}
 
-	pct, consensus = propagationStats([]query.Result{})
+	pct, consensus, _ = checker.PropagationStats([]query.Result{})
 	if pct != 0 {
-		t.Errorf("propagationStats([]) pct = %f; want 0", pct)
+		t.Errorf("checker.PropagationStats([]) pct = %f; want 0", pct)
 	}
 	if consensus != nil {
-		t.Errorf("propagationStats([]) consensus = %v; want nil", consensus)
+		t.Errorf("checker.PropagationStats([]) consensus = %v; want nil", consensus)
 	}
 }
 
@@ -558,12 +439,12 @@ func TestPropagationStats_AllErrors_ZeroPercent(t *testing.T) {
 		makeResult(query.Timeout),
 	}
 
-	pct, consensus := propagationStats(results)
+	pct, consensus, _ := checker.PropagationStats(results)
 	if pct != 0 {
-		t.Errorf("propagationStats(all failures) pct = %f; want 0", pct)
+		t.Errorf("checker.PropagationStats(all failures) pct = %f; want 0", pct)
 	}
 	if consensus != nil {
-		t.Errorf("propagationStats(all failures) consensus = %v; want nil", consensus)
+		t.Errorf("checker.PropagationStats(all failures) consensus = %v; want nil", consensus)
 	}
 }
 
@@ -576,12 +457,12 @@ func TestPropagationStats_AllSuccessAllAgree_100Percent(t *testing.T) {
 		makeResult(query.Success, "1.2.3.4"),
 	}
 
-	pct, consensus := propagationStats(results)
+	pct, consensus, _ := checker.PropagationStats(results)
 	if pct != 100.0 {
-		t.Errorf("propagationStats(all agree) pct = %f; want 100.0", pct)
+		t.Errorf("checker.PropagationStats(all agree) pct = %f; want 100.0", pct)
 	}
 	if len(consensus) != 1 || consensus[0] != "1.2.3.4" {
-		t.Errorf("propagationStats(all agree) consensus = %v; want [1.2.3.4]", consensus)
+		t.Errorf("checker.PropagationStats(all agree) consensus = %v; want [1.2.3.4]", consensus)
 	}
 }
 
@@ -596,13 +477,13 @@ func TestPropagationStats_MajorityConsensus(t *testing.T) {
 		makeResult(query.Success, "5.6.7.8"),
 	}
 
-	pct, consensus := propagationStats(results)
+	pct, consensus, _ := checker.PropagationStats(results)
 	wantPct := 75.0
 	if pct != wantPct {
-		t.Errorf("propagationStats pct = %f; want %f", pct, wantPct)
+		t.Errorf("checker.PropagationStats pct = %f; want %f", pct, wantPct)
 	}
 	if len(consensus) != 1 || consensus[0] != "1.2.3.4" {
-		t.Errorf("propagationStats consensus = %v; want [1.2.3.4]", consensus)
+		t.Errorf("checker.PropagationStats consensus = %v; want [1.2.3.4]", consensus)
 	}
 }
 
@@ -615,9 +496,9 @@ func TestPropagationStats_NoMajority_NilConsensus(t *testing.T) {
 		makeResult(query.Success, "5.6.7.8"),
 	}
 
-	_, consensus := propagationStats(results)
+	_, consensus, _ := checker.PropagationStats(results)
 	if consensus != nil {
-		t.Errorf("propagationStats(50/50 split) consensus = %v; want nil", consensus)
+		t.Errorf("checker.PropagationStats(50/50 split) consensus = %v; want nil", consensus)
 	}
 }
 
@@ -633,13 +514,13 @@ func TestPropagationStats_MixedSuccessAndFailure(t *testing.T) {
 		makeResult(query.Timeout),
 	}
 
-	pct, consensus := propagationStats(results)
+	pct, consensus, _ := checker.PropagationStats(results)
 	if pct != 50.0 {
-		t.Errorf("propagationStats pct = %f; want 50.0", pct)
+		t.Errorf("checker.PropagationStats pct = %f; want 50.0", pct)
 	}
 	// 2 successes out of 4 total — 2 is not > 4/2 (integer division: 2 > 2 is false).
 	if consensus != nil {
-		t.Errorf("propagationStats(2/4 agree) consensus should be nil (not strict majority); got %v", consensus)
+		t.Errorf("checker.PropagationStats(2/4 agree) consensus should be nil (not strict majority); got %v", consensus)
 	}
 }
 
@@ -655,13 +536,13 @@ func TestPropagationStats_StrictMajorityThreshold(t *testing.T) {
 		makeResult(query.Error),
 	}
 
-	pct, consensus := propagationStats(results)
+	pct, consensus, _ := checker.PropagationStats(results)
 	wantPct := 60.0
 	if pct != wantPct {
-		t.Errorf("propagationStats pct = %f; want %f", pct, wantPct)
+		t.Errorf("checker.PropagationStats pct = %f; want %f", pct, wantPct)
 	}
 	if len(consensus) == 0 {
-		t.Error("propagationStats: expected consensus for strict majority (3 > 5/2=2)")
+		t.Error("checker.PropagationStats: expected consensus for strict majority (3 > 5/2=2)")
 	}
 }
 
@@ -672,13 +553,13 @@ func TestPropagationStats_SingleResult_Success(t *testing.T) {
 		makeResult(query.Success, "10.0.0.1"),
 	}
 
-	pct, consensus := propagationStats(results)
+	pct, consensus, _ := checker.PropagationStats(results)
 	if pct != 100.0 {
-		t.Errorf("propagationStats(single success) pct = %f; want 100.0", pct)
+		t.Errorf("checker.PropagationStats(single success) pct = %f; want 100.0", pct)
 	}
 	// 1 > 1/2 (int: 0) — strict majority.
 	if len(consensus) != 1 {
-		t.Errorf("propagationStats(single success) consensus = %v; want [10.0.0.1]", consensus)
+		t.Errorf("checker.PropagationStats(single success) consensus = %v; want [10.0.0.1]", consensus)
 	}
 }
 
@@ -689,12 +570,12 @@ func TestPropagationStats_SingleResult_Error(t *testing.T) {
 		makeResult(query.Error),
 	}
 
-	pct, consensus := propagationStats(results)
+	pct, consensus, _ := checker.PropagationStats(results)
 	if pct != 0 {
-		t.Errorf("propagationStats(single error) pct = %f; want 0", pct)
+		t.Errorf("checker.PropagationStats(single error) pct = %f; want 0", pct)
 	}
 	if consensus != nil {
-		t.Errorf("propagationStats(single error) consensus = %v; want nil", consensus)
+		t.Errorf("checker.PropagationStats(single error) consensus = %v; want nil", consensus)
 	}
 }
 
@@ -708,12 +589,12 @@ func TestPropagationStats_MultipleRecordsPerResult(t *testing.T) {
 		makeResult(query.Success, "1.2.3.4", "5.6.7.8"),
 	}
 
-	pct, consensus := propagationStats(results)
+	pct, consensus, _ := checker.PropagationStats(results)
 	if pct != 100.0 {
-		t.Errorf("propagationStats(multi-record sets, same content) pct = %f; want 100.0", pct)
+		t.Errorf("checker.PropagationStats(multi-record sets, same content) pct = %f; want 100.0", pct)
 	}
 	if len(consensus) != 2 {
-		t.Errorf("propagationStats consensus length = %d; want 2 records", len(consensus))
+		t.Errorf("checker.PropagationStats consensus length = %d; want 2 records", len(consensus))
 	}
 }
 
@@ -1099,27 +980,6 @@ func TestExecute_InvalidFlag_ReturnsError(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Benchmarks
 // ─────────────────────────────────────────────────────────────────────────────
-
-func BenchmarkNormaliseRecordSet_Small(b *testing.B) {
-	b.ReportAllocs()
-	records := []string{"5.6.7.8", "1.2.3.4", "9.10.11.12"}
-	b.ResetTimer()
-	for range b.N {
-		normaliseRecordSet(records)
-	}
-}
-
-func BenchmarkNormaliseRecordSet_Large(b *testing.B) {
-	b.ReportAllocs()
-	records := make([]string, 20)
-	for i := range records {
-		records[i] = fmt.Sprintf("192.168.1.%d", i)
-	}
-	b.ResetTimer()
-	for range b.N {
-		normaliseRecordSet(records)
-	}
-}
 
 func BenchmarkTruncate(b *testing.B) {
 	b.ReportAllocs()
@@ -1606,7 +1466,7 @@ func BenchmarkPropagationStats(b *testing.B) {
 	}
 	b.ResetTimer()
 	for range b.N {
-		propagationStats(results)
+		checker.PropagationStats(results)
 	}
 }
 

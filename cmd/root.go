@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"strings"
@@ -251,7 +252,7 @@ func runJSON(cfg checker.Config) error {
 
 	slog.Info("cmd: all queries complete", slog.Int("result_count", len(results)))
 
-	pct, consensus := propagationStats(results)
+	pct, consensus, _ := checker.PropagationStats(results)
 
 	out := jsonOutput{
 		Domain:         cfg.Domain,
@@ -325,11 +326,11 @@ func runPlain(cfg checker.Config) error {
 
 	fmt.Println()
 
-	pct, consensus := propagationStats(all)
+	pct, consensus, _ := checker.PropagationStats(all)
 
 	fmt.Printf("Propagation: %s (%d/%d resolvers agree)\n",
 		styleBold.Render(fmt.Sprintf("%.0f%%", pct)),
-		int(pct/100*float64(len(all))),
+		int(math.Round(pct/100*float64(len(all)))),
 		len(all),
 	)
 
@@ -397,67 +398,6 @@ func printRow(r query.Result) {
 	)
 }
 
-// propagationStats computes the propagation percentage and the consensus
-// record set from a completed slice of results. Consensus is defined as the
-// record set returned by the strict majority (> 50%) of successful resolvers.
-// If no majority exists, consensus is nil.
-func propagationStats(results []query.Result) (pct float64, consensus []string) {
-	if len(results) == 0 {
-		slog.Debug("cmd: propagationStats called with empty results")
-		return 0, nil
-	}
-
-	// Count occurrences of each normalised record set.
-	type key = string
-	counts := make(map[key]int)
-	setOf := make(map[key][]string)
-	successes := 0
-
-	for _, r := range results {
-		if r.Status != query.Success {
-			continue
-		}
-		successes++
-		k := normaliseRecordSet(r.Records)
-		counts[k]++
-		setOf[k] = r.Records
-	}
-
-	slog.Debug("cmd: propagation stats computed",
-		slog.Int("total", len(results)),
-		slog.Int("successes", successes),
-		slog.Int("distinct_sets", len(counts)),
-	)
-
-	if successes == 0 {
-		return 0, nil
-	}
-
-	// Find the most common record set.
-	var bestKey key
-	bestCount := 0
-
-	for k, c := range counts {
-		if c > bestCount {
-			bestCount = c
-			bestKey = k
-		}
-	}
-
-	pct = float64(bestCount) / float64(len(results)) * 100
-
-	if bestCount > len(results)/2 {
-		consensus = setOf[bestKey]
-	}
-
-	slog.Info("cmd: propagation stats",
-		slog.Float64("pct", pct),
-		slog.Int("consensus_count", len(consensus)),
-	)
-
-	return pct, consensus
-}
-
 // toJSONResults converts a slice of query.Result values into the JSON-friendly
 // jsonResult slice, extracting only the fields needed for the output schema.
 func toJSONResults(results []query.Result) []jsonResult {
@@ -516,24 +456,6 @@ func locationString(r resolver.Resolver) string {
 		return r.Country
 	}
 	return r.Continent
-}
-
-// normaliseRecordSet produces a stable, canonical string key from a record
-// slice by sorting entries lexicographically and joining with a pipe separator.
-// This allows map lookups regardless of the order resolvers return records.
-func normaliseRecordSet(records []string) string {
-	if len(records) == 0 {
-		return ""
-	}
-	sorted := make([]string, len(records))
-	copy(sorted, records)
-	// Insertion sort is fine here: record sets are almost always < 10 entries.
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
-	return strings.Join(sorted, "|")
 }
 
 // shortRecord strips the full DNS wire-format prefix from a record string,

@@ -923,7 +923,7 @@ func TestRenderRow_Pending(t *testing.T) {
 
 	r := makeResolver("1.1.1.1", "Cloudflare Primary", "Anycast", "Global", "Global")
 
-	got := renderRow(r, query.Result{}, false, nil)
+	got := renderRow(r, query.Result{}, false, nil, false)
 
 	if got == "" {
 		t.Fatal("renderRow returned empty string for pending state")
@@ -944,7 +944,7 @@ func TestRenderRow_Success_MatchesConsensus(t *testing.T) {
 	result := successResult(r, []string{"1.2.3.4"}, 25*time.Millisecond)
 	consensus := []string{"1.2.3.4"}
 
-	got := renderRow(r, result, true, consensus)
+	got := renderRow(r, result, true, consensus, true)
 
 	if !strings.Contains(got, "1.2.3.4") {
 		t.Errorf("renderRow success: expected answer in output, got: %q", got)
@@ -961,7 +961,7 @@ func TestRenderRow_Success_Divergent(t *testing.T) {
 	result := successResult(r, []string{"9.9.9.9"}, 30*time.Millisecond)
 	consensus := []string{"1.2.3.4"} // different from result
 
-	got := renderRow(r, result, true, consensus)
+	got := renderRow(r, result, true, consensus, true)
 
 	// Divergent row should still contain the answer.
 	if !strings.Contains(got, "9.9.9.9") {
@@ -975,7 +975,7 @@ func TestRenderRow_Timeout(t *testing.T) {
 	r := makeResolver("1.0.0.1", "CF Secondary", "Anycast", "Global", "Global")
 	result := timeoutResult(r)
 
-	got := renderRow(r, result, true, nil)
+	got := renderRow(r, result, true, nil, false)
 
 	if !strings.Contains(got, "timeout") {
 		t.Errorf("renderRow timeout: expected 'timeout' in output, got: %q", got)
@@ -988,7 +988,7 @@ func TestRenderRow_Error(t *testing.T) {
 	r := makeResolver("9.9.9.9", "Quad9", "Anycast", "Global", "Global")
 	result := errorResult(r, "connection refused")
 
-	got := renderRow(r, result, true, nil)
+	got := renderRow(r, result, true, nil, false)
 
 	if !strings.Contains(got, "connection refused") {
 		t.Errorf("renderRow error: expected error message in output, got: %q", got)
@@ -1005,7 +1005,7 @@ func TestRenderRow_ErrorStatus_NoErrorField(t *testing.T) {
 		Error:    nil,
 	}
 
-	got := renderRow(r, result, true, nil)
+	got := renderRow(r, result, true, nil, false)
 
 	// When Status==Error but Error field is nil, "error" is used as the message.
 	if !strings.Contains(got, "error") {
@@ -1019,7 +1019,7 @@ func TestRenderRow_LongNameTruncated(t *testing.T) {
 	longName := strings.Repeat("A", colWidthName+10)
 	r := makeResolver("10.0.0.1", longName, "City", "Country", "Europe")
 
-	got := renderRow(r, query.Result{}, false, nil)
+	got := renderRow(r, query.Result{}, false, nil, false)
 
 	// The name cell must not exceed colWidthName visible characters.
 	// Find it in the output (it starts after rowIndent, at the beginning of the row).
@@ -1034,7 +1034,7 @@ func TestRenderRow_StartsWithIndent(t *testing.T) {
 
 	r := makeResolver("1.1.1.1", "CF", "A", "G", "Global")
 
-	got := renderRow(r, query.Result{}, false, nil)
+	got := renderRow(r, query.Result{}, false, nil, false)
 
 	if !strings.HasPrefix(got, rowIndent) {
 		t.Errorf("renderRow should start with rowIndent %q", rowIndent)
@@ -1050,7 +1050,6 @@ func TestViewState_RenderFooter_NilConsensus(t *testing.T) {
 	v := &viewState{
 		resolvers: []resolver.Resolver{r},
 		results:   map[string]query.Result{},
-		consensus: nil,
 		startTime: time.Now(),
 	}
 
@@ -1076,7 +1075,6 @@ func TestViewState_RenderFooter_WithConsensus(t *testing.T) {
 		results: map[string]query.Result{
 			"1.1.1.1": successResult(r, []string{"1.2.3.4"}, 5*time.Millisecond),
 		},
-		consensus: []string{"1.2.3.4"},
 		startTime: time.Now(),
 	}
 
@@ -1084,102 +1082,6 @@ func TestViewState_RenderFooter_WithConsensus(t *testing.T) {
 
 	if !strings.Contains(got, "1.2.3.4") {
 		t.Error("renderFooter should display consensus answer")
-	}
-}
-
-// ─── propagationPct ───────────────────────────────────────────────────────────
-
-func TestViewState_PropagationPct_NoResolvers(t *testing.T) {
-	t.Parallel()
-
-	v := &viewState{
-		resolvers: nil,
-		consensus: []string{"1.2.3.4"},
-		results:   map[string]query.Result{},
-	}
-
-	got := v.propagationPct()
-	if got != 0 {
-		t.Errorf("propagationPct with no resolvers = %.2f, want 0", got)
-	}
-}
-
-func TestViewState_PropagationPct_NoConsensus(t *testing.T) {
-	t.Parallel()
-
-	r := makeResolver("1.1.1.1", "CF", "A", "G", "Global")
-	v := &viewState{
-		resolvers: []resolver.Resolver{r},
-		consensus: nil,
-		results: map[string]query.Result{
-			"1.1.1.1": successResult(r, []string{"1.2.3.4"}, 5*time.Millisecond),
-		},
-	}
-
-	got := v.propagationPct()
-	if got != 0 {
-		t.Errorf("propagationPct with nil consensus = %.2f, want 0", got)
-	}
-}
-
-func TestViewState_PropagationPct_AllMatch(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1", "CF", "A", "G", "Global")
-	r2 := makeResolver("8.8.8.8", "G", "A", "G", "Global")
-	v := &viewState{
-		resolvers: []resolver.Resolver{r1, r2},
-		consensus: []string{"1.2.3.4"},
-		results: map[string]query.Result{
-			"1.1.1.1": successResult(r1, []string{"1.2.3.4"}, 5*time.Millisecond),
-			"8.8.8.8": successResult(r2, []string{"1.2.3.4"}, 10*time.Millisecond),
-		},
-	}
-
-	got := v.propagationPct()
-	if got != 100 {
-		t.Errorf("propagationPct all matching = %.2f, want 100", got)
-	}
-}
-
-func TestViewState_PropagationPct_HalfMatch(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1", "CF", "A", "G", "Global")
-	r2 := makeResolver("8.8.8.8", "G", "A", "G", "Global")
-	v := &viewState{
-		resolvers: []resolver.Resolver{r1, r2},
-		consensus: []string{"1.2.3.4"},
-		results: map[string]query.Result{
-			"1.1.1.1": successResult(r1, []string{"1.2.3.4"}, 5*time.Millisecond),
-			"8.8.8.8": successResult(r2, []string{"9.9.9.9"}, 10*time.Millisecond),
-		},
-	}
-
-	got := v.propagationPct()
-	if got != 50 {
-		t.Errorf("propagationPct half match = %.2f, want 50", got)
-	}
-}
-
-func TestViewState_PropagationPct_PendingResolversCountAgainst(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1", "CF", "A", "G", "Global")
-	r2 := makeResolver("8.8.8.8", "G", "A", "G", "Global")
-	// r2 has no result yet (pending)
-	v := &viewState{
-		resolvers: []resolver.Resolver{r1, r2},
-		consensus: []string{"1.2.3.4"},
-		results: map[string]query.Result{
-			"1.1.1.1": successResult(r1, []string{"1.2.3.4"}, 5*time.Millisecond),
-		},
-	}
-
-	got := v.propagationPct()
-	// 1 matching out of 2 total resolvers = 50%
-	if got != 50 {
-		t.Errorf("propagationPct with pending resolver = %.2f, want 50", got)
 	}
 }
 
@@ -1456,7 +1358,6 @@ func TestPrintFooter_ContainsSummaryLabels(t *testing.T) {
 
 	m.mu.Lock()
 	m.results["1.1.1.1"] = successResult(r, []string{"1.2.3.4"}, 10*time.Millisecond)
-	m.consensus = []string{"1.2.3.4"}
 	m.mu.Unlock()
 
 	m.printFooter()
@@ -1480,7 +1381,6 @@ func TestPrintFooter_ContainsConsensusAnswer(t *testing.T) {
 
 	m.mu.Lock()
 	m.results["8.8.8.8"] = successResult(r, []string{"203.0.113.42"}, 5*time.Millisecond)
-	m.consensus = []string{"203.0.113.42"}
 	m.mu.Unlock()
 
 	m.printFooter()

@@ -88,7 +88,6 @@ type Model struct {
 	recordType string
 	resolvers  []resolver.Resolver
 	results    map[string]query.Result
-	consensus  []string
 	startTime  time.Time
 	checker    *checker.Checker
 }
@@ -141,19 +140,14 @@ func (m *Model) Run() error {
 
 	resultCh, _ := m.checker.Stream(ctx)
 
-	// Collect all results in the background.
 	doneCh := make(chan struct{})
 	go func() {
 		defer close(doneCh)
 		for result := range resultCh {
 			m.mu.Lock()
 			m.results[result.Resolver.IP] = result
-			m.consensus = checker.ConsensusRecords(resultsSlice(m.results))
 			m.mu.Unlock()
 		}
-		m.mu.Lock()
-		m.consensus = checker.ConsensusRecords(resultsSlice(m.results))
-		m.mu.Unlock()
 	}()
 
 	// Animate the spinner while waiting.
@@ -175,14 +169,13 @@ reveal:
 	// Clear the spinner line.
 	m.clearStatusLine()
 
-	// Progressive reveal: print results grouped by continent with pacing.
 	m.mu.Lock()
-	consensus := m.consensus
 	results := make(map[string]query.Result, len(m.results))
 	for k, v := range m.results {
 		results[k] = v
 	}
 	m.mu.Unlock()
+	_, consensus, majority := checker.PropagationStats(resultsSlice(results))
 
 	grouped := groupByContinent(m.resolvers)
 	continents := orderedContinents(grouped)
@@ -198,7 +191,7 @@ reveal:
 		// Print each resolver row with a small delay.
 		for _, r := range grouped[continent] {
 			result, hasResult := results[r.IP]
-			row := renderRow(r, result, hasResult, consensus)
+			row := renderRow(r, result, hasResult, consensus, majority)
 			fmt.Fprintln(output, row)
 			time.Sleep(rowDelay)
 		}
@@ -278,7 +271,6 @@ func (m *Model) printFooter() {
 	v := &viewState{
 		resolvers: m.resolvers,
 		results:   m.results,
-		consensus: m.consensus,
 		startTime: m.startTime,
 	}
 	m.mu.Unlock()
@@ -295,7 +287,6 @@ func (m *Model) printFooter() {
 type viewState struct {
 	resolvers []resolver.Resolver
 	results   map[string]query.Result
-	consensus []string
 	startTime time.Time
 }
 
@@ -313,7 +304,7 @@ func renderColumnHeaders() string {
 
 // renderRow produces a single formatted table row for one resolver. It uses
 // the live result if one has arrived, or a pending placeholder otherwise.
-func renderRow(r resolver.Resolver, result query.Result, hasResult bool, consensus []string) string {
+func renderRow(r resolver.Resolver, result query.Result, hasResult bool, consensus []string, majority bool) string {
 	nameCell := padVisible(truncate(r.Name, colWidthName), colWidthName)
 	locCell := padVisible(truncate(formatLocation(r), colWidthLocation), colWidthLocation)
 
@@ -341,7 +332,7 @@ func renderRow(r resolver.Resolver, result query.Result, hasResult bool, consens
 
 	default:
 		answer := formatAnswer(result.Records)
-		if matchesConsensus(result.Records, consensus) {
+		if majority && matchesConsensus(result.Records, consensus) {
 			statusCell = padVisible(styleGreen.Render("✓"), colWidthStatus)
 			answerCell = padVisible(styleGreen.Render(truncate(answer, colWidthAnswer)), colWidthAnswer)
 		} else {
@@ -356,16 +347,14 @@ func renderRow(r resolver.Resolver, result query.Result, hasResult bool, consens
 
 // ─── Footer ───────────────────────────────────────────────────────────────────
 
-// renderFooter builds the summary bar showing checked count, consensus answer,
-// and overall propagation percentage.
 func (v *viewState) renderFooter() string {
 	total := len(v.resolvers)
 	checked := len(v.results)
-	pct := v.propagationPct()
+	pct, consensus, _ := checker.PropagationStats(resultsSlice(v.results))
 
 	consensusStr := "—"
-	if len(v.consensus) > 0 {
-		consensusStr = truncate(formatAnswer(v.consensus), 48)
+	if len(consensus) > 0 {
+		consensusStr = truncate(formatAnswer(consensus), 48)
 	}
 
 	divider := rowIndent + styleDimGray.Render(strings.Repeat("─", totalTableWidth())) + "\n"
@@ -382,24 +371,6 @@ func (v *viewState) renderFooter() string {
 
 // ─── Propagation helpers ──────────────────────────────────────────────────────
 
-// propagationPct returns the percentage of all configured resolvers whose
-// answer matches the consensus. Resolvers that have not responded yet count
-// as non-matching so the value grows monotonically as results arrive.
-func (v *viewState) propagationPct() float64 {
-	if len(v.resolvers) == 0 || len(v.consensus) == 0 {
-		return 0
-	}
-	matching := 0
-	for _, r := range v.results {
-		if r.Status == query.Success && matchesConsensus(r.Records, v.consensus) {
-			matching++
-		}
-	}
-	return float64(matching) / float64(len(v.resolvers)) * 100
-}
-
-// matchesConsensus reports whether records (after sorting) equal the
-// consensus slice (which is already sorted by ConsensusRecords).
 func matchesConsensus(records, consensus []string) bool {
 	if len(records) != len(consensus) {
 		return false

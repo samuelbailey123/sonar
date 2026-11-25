@@ -69,7 +69,7 @@ Cloudflare Primary           Global, Anycast          ✓ 172.66.147.243 +1     
 [... 51 more rows ...]
 
 Propagation: 100% (54/54 resolvers agree)
-Consensus:   example.com. 212 IN A 172.66.147.243, example.com. 212 IN A 104.20.23.154
+Consensus:   example.com. 212 IN A 104.20.23.154, example.com. 212 IN A 172.66.147.243
 ```
 
 ### JSON Output
@@ -86,8 +86,8 @@ Output, trimmed to two results:
   "timestamp": "2026-11-25T21:40:13.643284Z",
   "propagation_pct": 100,
   "consensus": [
-    "example.com. 212 IN A 172.66.147.243",
-    "example.com. 212 IN A 104.20.23.154"
+    "example.com. 212 IN A 104.20.23.154",
+    "example.com. 212 IN A 172.66.147.243"
   ],
   "results": [
     {
@@ -338,7 +338,7 @@ Each element in the `results` array has:
 (resolvers returning the most common record set) / (all resolvers queried) * 100
 ```
 
-**Consensus** is the most common record set when more than half of all resolvers queried returned it; timeouts and errors count toward the total. Record sets are compared after sorting. If no set reaches a majority, `consensus` is `null`.
+**Consensus** is the most common record set when more than half of all resolvers queried returned it; timeouts and errors count toward the total. Record sets are compared after sorting, and the consensus is listed sorted. Every output uses this rule: if no set reaches a majority, `consensus` is `null`, `--no-tui` prints `none`, and the default view shows `—` and marks no row ✓.
 
 **Query status**:
 - `success` — resolver returned a valid DNS response

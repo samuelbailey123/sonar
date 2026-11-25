@@ -2,8 +2,6 @@ package checker_test
 
 import (
 	"context"
-	"errors"
-	"sort"
 	"testing"
 	"time"
 
@@ -26,22 +24,6 @@ func makeResolver(ip string) resolver.Resolver {
 		Country:   "Test",
 		City:      "Test",
 		Continent: "Test",
-	}
-}
-
-// makeResult builds a query.Result with the given records and no error
-// (Success). Pass a non-nil error for the Error field to simulate failure.
-func makeResult(res resolver.Resolver, records []string, err error) query.Result {
-	st := query.Success
-	if err != nil {
-		st = query.Error
-	}
-	return query.Result{
-		Resolver: res,
-		Records:  records,
-		Status:   st,
-		Error:    err,
-		Latency:  1 * time.Millisecond,
 	}
 }
 
@@ -472,185 +454,6 @@ func TestResults_NotNilOnEmptyResolvers(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ConsensusRecords — unit tests (no network)
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestConsensusRecords(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1")
-	r2 := makeResolver("8.8.8.8")
-	r3 := makeResolver("9.9.9.9")
-	r4 := makeResolver("4.4.4.4")
-	r5 := makeResolver("5.5.5.5")
-
-	errSentinel := errors.New("network error")
-
-	tests := []struct {
-		name    string
-		results []query.Result
-		want    []string // nil means we expect nil return
-	}{
-		{
-			name:    "empty input returns nil",
-			results: nil,
-			want:    nil,
-		},
-		{
-			name: "all errors returns nil",
-			results: []query.Result{
-				makeResult(r1, nil, errSentinel),
-				makeResult(r2, nil, errSentinel),
-			},
-			want: nil,
-		},
-		{
-			name: "unanimous single record",
-			results: []query.Result{
-				makeResult(r1, []string{"93.184.216.34"}, nil),
-				makeResult(r2, []string{"93.184.216.34"}, nil),
-				makeResult(r3, []string{"93.184.216.34"}, nil),
-			},
-			want: []string{"93.184.216.34"},
-		},
-		{
-			name: "majority wins",
-			results: []query.Result{
-				makeResult(r1, []string{"1.1.1.1"}, nil),
-				makeResult(r2, []string{"2.2.2.2"}, nil),
-				makeResult(r3, []string{"1.1.1.1"}, nil),
-				makeResult(r4, []string{"1.1.1.1"}, nil),
-				makeResult(r5, []string{"2.2.2.2"}, nil),
-			},
-			want: []string{"1.1.1.1"},
-		},
-		{
-			name: "tie broken lexicographically (smaller wins)",
-			results: []query.Result{
-				makeResult(r1, []string{"b.example.com"}, nil),
-				makeResult(r2, []string{"a.example.com"}, nil),
-			},
-			// "a.example.com" < "b.example.com" lexicographically
-			want: []string{"a.example.com"},
-		},
-		{
-			name: "tie broken lexicographically (larger loses)",
-			results: []query.Result{
-				makeResult(r1, []string{"z.example.com"}, nil),
-				makeResult(r2, []string{"a.example.com"}, nil),
-			},
-			want: []string{"a.example.com"},
-		},
-		{
-			name: "multiple records sorted before comparison",
-			results: []query.Result{
-				makeResult(r1, []string{"b.com", "a.com"}, nil),
-				makeResult(r2, []string{"a.com", "b.com"}, nil),
-				makeResult(r3, []string{"c.com"}, nil),
-			},
-			// r1 and r2 normalise to ["a.com","b.com"], count=2 → consensus
-			want: []string{"a.com", "b.com"},
-		},
-		{
-			name: "errors excluded from tally",
-			results: []query.Result{
-				makeResult(r1, []string{"1.1.1.1"}, nil),
-				makeResult(r2, nil, errSentinel),
-				makeResult(r3, nil, errSentinel),
-				makeResult(r4, nil, errSentinel),
-			},
-			// Only r1 is counted; it is the sole successful answer.
-			want: []string{"1.1.1.1"},
-		},
-		{
-			name: "single successful result",
-			results: []query.Result{
-				makeResult(r1, []string{"42.42.42.42"}, nil),
-			},
-			want: []string{"42.42.42.42"},
-		},
-		{
-			name: "empty records slice in successful result",
-			results: []query.Result{
-				makeResult(r1, nil, nil), // success, but no records
-				makeResult(r2, nil, nil),
-			},
-			// Both have an empty record set (key=""), count=2 → consensus is empty
-			want: nil,
-		},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := checker.ConsensusRecords(tc.results)
-
-			if tc.want == nil {
-				if got != nil {
-					t.Errorf("ConsensusRecords = %v, want nil", got)
-				}
-				return
-			}
-
-			if got == nil {
-				t.Fatalf("ConsensusRecords returned nil, want %v", tc.want)
-			}
-
-			// Sort both for comparison because the consensus records are
-			// already sorted but we want deterministic test assertions.
-			gotCopy := make([]string, len(got))
-			copy(gotCopy, got)
-			sort.Strings(gotCopy)
-
-			wantCopy := make([]string, len(tc.want))
-			copy(wantCopy, tc.want)
-			sort.Strings(wantCopy)
-
-			if len(gotCopy) != len(wantCopy) {
-				t.Fatalf("ConsensusRecords length = %d, want %d\ngot:  %v\nwant: %v",
-					len(gotCopy), len(wantCopy), gotCopy, wantCopy)
-			}
-
-			for i := range gotCopy {
-				if gotCopy[i] != wantCopy[i] {
-					t.Errorf("ConsensusRecords[%d] = %q, want %q", i, gotCopy[i], wantCopy[i])
-				}
-			}
-		})
-	}
-}
-
-// TestConsensusRecords_DeterministicOnRepeatedCall verifies that calling
-// ConsensusRecords multiple times with the same input always yields the same
-// answer (important because map iteration order in Go is randomised).
-func TestConsensusRecords_DeterministicOnRepeatedCall(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1")
-	r2 := makeResolver("8.8.8.8")
-
-	results := []query.Result{
-		makeResult(r1, []string{"alpha.example.com"}, nil),
-		makeResult(r2, []string{"beta.example.com"}, nil),
-	}
-
-	first := checker.ConsensusRecords(results)
-	for i := 0; i < 20; i++ {
-		got := checker.ConsensusRecords(results)
-		if len(got) != len(first) {
-			t.Fatalf("iteration %d: length changed from %d to %d", i, len(first), len(got))
-		}
-		for j := range got {
-			if got[j] != first[j] {
-				t.Fatalf("iteration %d: result[%d] changed from %q to %q", i, j, first[j], got[j])
-			}
-		}
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Concurrency — race detector coverage
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -885,21 +688,4 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Benchmarks
-// ─────────────────────────────────────────────────────────────────────────────
-
-func BenchmarkConsensusRecords(b *testing.B) {
-	r := makeResolver("1.1.1.1")
-	results := make([]query.Result, 100)
-	for i := range results {
-		results[i] = makeResult(r, []string{"93.184.216.34", "1.2.3.4"}, nil)
-	}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		checker.ConsensusRecords(results)
-	}
 }
