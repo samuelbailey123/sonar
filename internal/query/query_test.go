@@ -2,7 +2,6 @@ package query
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"net"
 	"strings"
@@ -325,110 +324,8 @@ func TestIsNetError_PlainError(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Execute — unit tests using a local fake DNS server
+// Execute — unit tests
 // ─────────────────────────────────────────────────────────────────────────────
-
-// startFakeDNS starts a local UDP listener that replies to every DNS query
-// with the provided raw response bytes. The server mirrors the transaction ID
-// from each incoming query into the response. It returns the server address
-// and a stop function.
-//
-// Because Execute always dials port 53, these unit tests use executeWithPort
-// (defined below) which is a test-local variant that targets an arbitrary port.
-func startFakeDNS(t *testing.T, response []byte) (ip, port string, stop func()) {
-	t.Helper()
-
-	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("startFakeDNS: listen: %v", err)
-	}
-
-	addr := conn.LocalAddr().(*net.UDPAddr)
-	stopCh := make(chan struct{})
-
-	go func() {
-		buf := make([]byte, 512)
-		for {
-			select {
-			case <-stopCh:
-				return
-			default:
-			}
-			conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond)) //nolint:errcheck
-			n, remote, rerr := conn.ReadFrom(buf)
-			if rerr != nil {
-				continue
-			}
-			if n < 2 {
-				continue
-			}
-			resp := make([]byte, len(response))
-			copy(resp, response)
-			// Mirror the query's transaction ID into the response.
-			binary.BigEndian.PutUint16(resp[0:2], binary.BigEndian.Uint16(buf[0:2]))
-			conn.WriteTo(resp, remote) //nolint:errcheck
-		}
-	}()
-
-	return addr.IP.String(), strings.TrimPrefix(addr.String(), addr.IP.String()+":"), func() {
-		close(stopCh)
-		conn.Close()
-	}
-}
-
-// buildAResponse constructs a minimal wire-format DNS response containing one
-// A record for "example.com." pointing at 1.2.3.4 with TTL 60.
-func buildAResponse(t *testing.T) []byte {
-	t.Helper()
-
-	qname := encodeName("example.com")
-
-	hdr := make([]byte, 12)
-	binary.BigEndian.PutUint16(hdr[0:2], 0x0000) // placeholder ID
-	binary.BigEndian.PutUint16(hdr[2:4], 0x8180) // QR=1 RD=1 RA=1
-	binary.BigEndian.PutUint16(hdr[4:6], 1)      // QDCOUNT
-	binary.BigEndian.PutUint16(hdr[6:8], 1)      // ANCOUNT
-
-	question := append(append([]byte(nil), qname...), 0x00, 0x01, 0x00, 0x01) // TypeA, IN
-
-	answer := []byte{
-		0xC0, 0x0C, // compression pointer to offset 12 (start of qname)
-		0x00, 0x01, // TYPE = A
-		0x00, 0x01, // CLASS = IN
-		0x00, 0x00, 0x00, 0x3C, // TTL = 60
-		0x00, 0x04, // RDLENGTH = 4
-		1, 2, 3, 4, // RDATA = 1.2.3.4
-	}
-
-	var pkt []byte
-	pkt = append(pkt, hdr...)
-	pkt = append(pkt, question...)
-	pkt = append(pkt, answer...)
-	return pkt
-}
-
-// encodeName is a local alias so the test file can call the unexported helper
-// from the dns package without importing it directly. We use the dns package
-// constants and rely on the fact that we're in package query (white-box) which
-// imports dns — but we cannot access dns-internal helpers directly.
-// Instead we inline the wire-format encoding for test fixture construction only.
-func encodeName(domain string) []byte {
-	domain = strings.TrimRight(domain, ".")
-	labels := strings.Split(domain, ".")
-	var buf []byte
-	for _, label := range labels {
-		if len(label) == 0 {
-			continue
-		}
-		if len(label) > 63 {
-			label = label[:63]
-		}
-		buf = append(buf, byte(len(label)))
-		buf = append(buf, []byte(label)...)
-	}
-	buf = append(buf, 0x00)
-	return buf
-}
 
 // testResolver constructs a resolver.Resolver pointing at the given IP for use
 // in Execute tests.

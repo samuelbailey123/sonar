@@ -29,7 +29,7 @@ import (
 // All other styles are sourced from pre-defined package-level variables in
 // the style package so that color choices remain centralised.
 var (
-	styleHeader = style.New().Bold(true).Foreground("12")
+	styleHeader  = style.New().Bold(true).Foreground("12")
 	styleSuccess = style.Green
 	styleFailure = style.Red
 	styleDim     = style.DimGray
@@ -101,7 +101,7 @@ func Execute() error {
 	fs.BoolVar(&showVersion, "version", false, "print version information and exit")
 
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: sonar <domain> [flags]")
+		fmt.Fprintln(os.Stderr, "Usage: sonar [flags] <domain>")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Check DNS propagation for a domain across public resolvers worldwide.")
 		fmt.Fprintln(os.Stderr)

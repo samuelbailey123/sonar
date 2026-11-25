@@ -202,12 +202,12 @@ func buildQuery(domain string, qtype uint16) ([]byte, uint16) {
 	// |                    ARCOUNT                    |
 	// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 	header := make([]byte, 12)
-	binary.BigEndian.PutUint16(header[0:2], txID)    // ID
-	binary.BigEndian.PutUint16(header[2:4], 0x0100)  // Flags: RD=1
-	binary.BigEndian.PutUint16(header[4:6], 1)       // QDCOUNT
-	binary.BigEndian.PutUint16(header[6:8], 0)       // ANCOUNT
-	binary.BigEndian.PutUint16(header[8:10], 0)      // NSCOUNT
-	binary.BigEndian.PutUint16(header[10:12], 0)     // ARCOUNT
+	binary.BigEndian.PutUint16(header[0:2], txID)   // ID
+	binary.BigEndian.PutUint16(header[2:4], 0x0100) // Flags: RD=1
+	binary.BigEndian.PutUint16(header[4:6], 1)      // QDCOUNT
+	binary.BigEndian.PutUint16(header[6:8], 0)      // ANCOUNT
+	binary.BigEndian.PutUint16(header[8:10], 0)     // NSCOUNT
+	binary.BigEndian.PutUint16(header[10:12], 0)    // ARCOUNT
 
 	// Question section: encoded name + QTYPE (2 bytes) + QCLASS (2 bytes)
 	question := encodeName(domain)
@@ -284,7 +284,7 @@ func parseResponse(data []byte) ([]Record, error) {
 
 	// Header fields
 	// id     := binary.BigEndian.Uint16(data[0:2])  // not validated here
-	flags  := binary.BigEndian.Uint16(data[2:4])
+	flags := binary.BigEndian.Uint16(data[2:4])
 	qdcount := binary.BigEndian.Uint16(data[4:6])
 	ancount := binary.BigEndian.Uint16(data[6:8])
 	// nscount := binary.BigEndian.Uint16(data[8:10])   // not used
@@ -379,10 +379,10 @@ func parseRecord(data []byte, offset int) (Record, int, error) {
 		return Record{}, 0, fmt.Errorf("truncated record fixed fields at offset %d", offset)
 	}
 
-	rtype  := binary.BigEndian.Uint16(data[offset : offset+2])
+	rtype := binary.BigEndian.Uint16(data[offset : offset+2])
 	rclass := binary.BigEndian.Uint16(data[offset+2 : offset+4])
-	ttl    := binary.BigEndian.Uint32(data[offset+4 : offset+8])
-	rdlen  := int(binary.BigEndian.Uint16(data[offset+8 : offset+10]))
+	ttl := binary.BigEndian.Uint32(data[offset+4 : offset+8])
+	rdlen := int(binary.BigEndian.Uint16(data[offset+8 : offset+10]))
 	offset += 10
 
 	if offset+rdlen > len(data) {
@@ -528,10 +528,10 @@ func parseSOA(msg []byte, rdataOffset int, rdata []byte) (string, error) {
 			roffset, rdataEnd)
 	}
 
-	serial  := binary.BigEndian.Uint32(msg[roffset : roffset+4])
+	serial := binary.BigEndian.Uint32(msg[roffset : roffset+4])
 	refresh := binary.BigEndian.Uint32(msg[roffset+4 : roffset+8])
-	retry   := binary.BigEndian.Uint32(msg[roffset+8 : roffset+12])
-	expire  := binary.BigEndian.Uint32(msg[roffset+12 : roffset+16])
+	retry := binary.BigEndian.Uint32(msg[roffset+8 : roffset+12])
+	expire := binary.BigEndian.Uint32(msg[roffset+12 : roffset+16])
 	minimum := binary.BigEndian.Uint32(msg[roffset+16 : roffset+20])
 
 	return fmt.Sprintf("%s %s %d %d %d %d %d",

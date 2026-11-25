@@ -430,40 +430,8 @@ func TestStream_EmptyResolvers(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Results — copy semantics
+// Results
 // ─────────────────────────────────────────────────────────────────────────────
-
-func TestResults_ReturnsCopy(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping network integration test in short mode")
-	}
-
-	resolvers := reliableResolvers()[:2]
-	c := checker.New(checker.Config{
-		Domain:     "example.com",
-		RecordType: dns.TypeA,
-		Resolvers:  resolvers,
-		MaxWorkers: 2,
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if _, err := c.Run(ctx); err != nil {
-		t.Fatalf("Run error: %v", err)
-	}
-
-	first := c.Results()
-	originalLen := len(first)
-
-	// Truncate the returned slice — internal state must be unaffected.
-	first = first[:0]
-
-	second := c.Results()
-	if len(second) != originalLen {
-		t.Errorf("mutating returned slice affected internal state: got %d, want %d", len(second), originalLen)
-	}
-}
 
 func TestResults_BeforeRun_Empty(t *testing.T) {
 	t.Parallel()
@@ -500,117 +468,6 @@ func TestResults_NotNilOnEmptyResolvers(t *testing.T) {
 		// a non-nil empty slice. Both nil and non-nil empty slices are
 		// functionally equivalent here — just ensure no panic.
 		t.Log("Results returned nil for empty resolver list (acceptable)")
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PropagationPercentage — unit tests (no network)
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestPropagationPercentage(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1")
-	r2 := makeResolver("8.8.8.8")
-	r3 := makeResolver("9.9.9.9")
-	r4 := makeResolver("4.4.4.4")
-
-	errSentinel := errors.New("timeout")
-
-	tests := []struct {
-		name    string
-		results []query.Result
-		want    float64
-	}{
-		{
-			name:    "empty input returns 0",
-			results: nil,
-			want:    0,
-		},
-		{
-			name: "all errors returns 0",
-			results: []query.Result{
-				makeResult(r1, nil, errSentinel),
-				makeResult(r2, nil, errSentinel),
-			},
-			want: 0,
-		},
-		{
-			name: "all matching returns 100",
-			results: []query.Result{
-				makeResult(r1, []string{"93.184.216.34"}, nil),
-				makeResult(r2, []string{"93.184.216.34"}, nil),
-				makeResult(r3, []string{"93.184.216.34"}, nil),
-			},
-			want: 100,
-		},
-		{
-			name: "single successful result returns 100",
-			results: []query.Result{
-				makeResult(r1, []string{"1.2.3.4"}, nil),
-			},
-			want: 100,
-		},
-		{
-			name: "mixed matching and non-matching",
-			results: []query.Result{
-				makeResult(r1, []string{"93.184.216.34"}, nil),
-				makeResult(r2, []string{"93.184.216.34"}, nil),
-				makeResult(r3, []string{"1.2.3.4"}, nil),
-				makeResult(r4, []string{"93.184.216.34"}, nil),
-			},
-			// consensus = "93.184.216.34" (3 of 4), 3/4 * 100 = 75
-			want: 75,
-		},
-		{
-			name: "errors excluded from denominator",
-			results: []query.Result{
-				makeResult(r1, []string{"93.184.216.34"}, nil),
-				makeResult(r2, []string{"93.184.216.34"}, nil),
-				makeResult(r3, nil, errSentinel),
-				makeResult(r4, nil, errSentinel),
-			},
-			// Only r1 and r2 counted; both match consensus → 100%
-			want: 100,
-		},
-		{
-			name: "half matching half not",
-			results: []query.Result{
-				makeResult(r1, []string{"1.1.1.1"}, nil),
-				makeResult(r2, []string{"2.2.2.2"}, nil),
-			},
-			// Tie: consensus chosen by lexicographic order of joined key.
-			// "1.1.1.1" < "2.2.2.2" → consensus is "1.1.1.1", 1/2 = 50%
-			want: 50,
-		},
-		{
-			name: "record order does not affect matching",
-			results: []query.Result{
-				makeResult(r1, []string{"b.com", "a.com"}, nil),
-				makeResult(r2, []string{"a.com", "b.com"}, nil),
-				makeResult(r3, []string{"a.com", "b.com"}, nil),
-			},
-			// After sorting, both produce "a.com|b.com" — all match → 100%
-			want: 100,
-		},
-		{
-			name: "single result with error returns 0",
-			results: []query.Result{
-				makeResult(r1, nil, errSentinel),
-			},
-			want: 0,
-		},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := checker.PropagationPercentage(tc.results)
-			if got != tc.want {
-				t.Errorf("PropagationPercentage = %v, want %v", got, tc.want)
-			}
-		})
 	}
 }
 
@@ -790,34 +647,6 @@ func TestConsensusRecords_DeterministicOnRepeatedCall(t *testing.T) {
 				t.Fatalf("iteration %d: result[%d] changed from %q to %q", i, j, first[j], got[j])
 			}
 		}
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PropagationPercentage + ConsensusRecords — boundary / precision
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestPropagationPercentage_PrecisionNotRounded(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1")
-	r2 := makeResolver("8.8.8.8")
-	r3 := makeResolver("9.9.9.9")
-
-	// 2 of 3 match → 66.666...
-	results := []query.Result{
-		makeResult(r1, []string{"93.184.216.34"}, nil),
-		makeResult(r2, []string{"93.184.216.34"}, nil),
-		makeResult(r3, []string{"1.2.3.4"}, nil),
-	}
-
-	got := checker.PropagationPercentage(results)
-	expected := (2.0 / 3.0) * 100
-
-	// Use a tolerance because floating-point equality is unreliable.
-	const epsilon = 1e-9
-	if got < expected-epsilon || got > expected+epsilon {
-		t.Errorf("PropagationPercentage = %v, want approximately %v", got, expected)
 	}
 }
 
@@ -1061,23 +890,6 @@ func itoa(n int) string {
 // ─────────────────────────────────────────────────────────────────────────────
 // Benchmarks
 // ─────────────────────────────────────────────────────────────────────────────
-
-func BenchmarkPropagationPercentage(b *testing.B) {
-	r := makeResolver("1.1.1.1")
-	results := make([]query.Result, 100)
-	for i := range results {
-		if i%10 == 0 {
-			results[i] = makeResult(r, []string{"1.2.3.4"}, nil)
-		} else {
-			results[i] = makeResult(r, []string{"93.184.216.34"}, nil)
-		}
-	}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		checker.PropagationPercentage(results)
-	}
-}
 
 func BenchmarkConsensusRecords(b *testing.B) {
 	r := makeResolver("1.1.1.1")

@@ -1031,12 +1031,12 @@ func TestParseRecord_TruncatedRDATA(t *testing.T) {
 	t.Parallel()
 	// Name: [0] (root only, 1 byte). TYPE=A, CLASS=IN, TTL=0, RDLENGTH=100 (way too large).
 	var msg []byte
-	msg = append(msg, 0x00)                        // root label
-	msg = append(msg, 0x00, 0x01)                  // TYPE=A
-	msg = append(msg, 0x00, 0x01)                  // CLASS=IN
-	msg = append(msg, 0x00, 0x00, 0x00, 0x00)      // TTL=0
-	msg = append(msg, 0x00, 0x64)                  // RDLENGTH=100
-	msg = append(msg, 0x01, 0x02)                  // only 2 bytes of RDATA
+	msg = append(msg, 0x00)                   // root label
+	msg = append(msg, 0x00, 0x01)             // TYPE=A
+	msg = append(msg, 0x00, 0x01)             // CLASS=IN
+	msg = append(msg, 0x00, 0x00, 0x00, 0x00) // TTL=0
+	msg = append(msg, 0x00, 0x64)             // RDLENGTH=100
+	msg = append(msg, 0x01, 0x02)             // only 2 bytes of RDATA
 
 	_, _, err := parseRecord(msg, 0)
 	if err == nil {
@@ -1166,8 +1166,8 @@ func TestParseResponse_AnswerRecordError(t *testing.T) {
 	hdr := make([]byte, 12)
 	binary.BigEndian.PutUint16(hdr[0:2], 0x5678)
 	binary.BigEndian.PutUint16(hdr[2:4], 0x8180)
-	binary.BigEndian.PutUint16(hdr[4:6], 0)      // QDCOUNT=0
-	binary.BigEndian.PutUint16(hdr[6:8], 1)      // ANCOUNT=1
+	binary.BigEndian.PutUint16(hdr[4:6], 0) // QDCOUNT=0
+	binary.BigEndian.PutUint16(hdr[6:8], 1) // ANCOUNT=1
 
 	// Answer record: valid root label then truncated fixed fields (only 2 bytes).
 	pkt := append(hdr, 0x00, 0x00, 0x01) // root + 2 bytes (need 10)
@@ -1312,9 +1312,9 @@ func (c *fakeConn) Read(b []byte) (int, error) {
 	return n, nil
 }
 
-func (c *fakeConn) Close() error                       { return c.closeErr }
-func (c *fakeConn) LocalAddr() net.Addr                { return &net.UDPAddr{} }
-func (c *fakeConn) RemoteAddr() net.Addr               { return &net.UDPAddr{} }
+func (c *fakeConn) Close() error         { return c.closeErr }
+func (c *fakeConn) LocalAddr() net.Addr  { return &net.UDPAddr{} }
+func (c *fakeConn) RemoteAddr() net.Addr { return &net.UDPAddr{} }
 
 // withFakeDialer temporarily replaces dialUDP with a dialer that returns fc,
 // and returns a restore function. Must be called in non-parallel tests only.

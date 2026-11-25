@@ -203,54 +203,6 @@ func (c *Checker) Results() []query.Result {
 	return out
 }
 
-// PropagationPercentage returns the proportion of successful results that
-// agree with the consensus answer, expressed as a value between 0 and 100.
-//
-// The consensus answer is the most commonly observed set of records across all
-// successful results (see ConsensusRecords). Resolvers that returned an error
-// are excluded from both the numerator and denominator so that network
-// failures do not artificially deflate the propagation percentage.
-//
-// Returns 0 if there are no successful results.
-func PropagationPercentage(results []query.Result) float64 {
-	consensus := ConsensusRecords(results)
-	consensusKey := joinRecords(consensus)
-
-	var successCount, matchCount int
-
-	for _, r := range results {
-		if r.Error != nil {
-			slog.Debug("checker: skipping errored result in propagation calculation",
-				slog.String("resolver", r.Resolver.IP),
-				slog.String("error", r.Error.Error()),
-			)
-			continue
-		}
-
-		successCount++
-
-		sorted := sortedCopy(r.Records)
-		if joinRecords(sorted) == consensusKey {
-			matchCount++
-		}
-	}
-
-	if successCount == 0 {
-		slog.Debug("checker: no successful results, propagation is 0%")
-		return 0
-	}
-
-	pct := float64(matchCount) / float64(successCount) * 100
-
-	slog.Info("checker: propagation percentage calculated",
-		slog.Int("successful_resolvers", successCount),
-		slog.Int("matching_resolvers", matchCount),
-		slog.Float64("percentage", pct),
-	)
-
-	return pct
-}
-
 // ConsensusRecords returns the most commonly observed set of DNS records
 // across all successful results. Records within each result are sorted before
 // comparison so that ordering differences between resolvers do not create

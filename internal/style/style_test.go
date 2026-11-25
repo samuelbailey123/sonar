@@ -128,28 +128,6 @@ func TestStyleRender_BoldFalse(t *testing.T) {
 	}
 }
 
-func TestStyleRender_Dim(t *testing.T) {
-	t.Parallel()
-	got := New().Dim(true).Render("text")
-	if !strings.Contains(got, "\x1b[2m") {
-		t.Errorf("dim Render missing dim escape, got %q", got)
-	}
-	if !strings.HasSuffix(got, "\x1b[0m") {
-		t.Errorf("dim Render missing reset suffix, got %q", got)
-	}
-}
-
-func TestStyleRender_Underline(t *testing.T) {
-	t.Parallel()
-	got := New().Underline(true).Render("text")
-	if !strings.Contains(got, "\x1b[4m") {
-		t.Errorf("underline Render missing underline escape, got %q", got)
-	}
-	if !strings.HasSuffix(got, "\x1b[0m") {
-		t.Errorf("underline Render missing reset suffix, got %q", got)
-	}
-}
-
 func TestStyleRender_Foreground(t *testing.T) {
 	t.Parallel()
 	got := New().Foreground("#22c55e").Render("text")
@@ -192,8 +170,6 @@ func TestStyleRender_ResetPresent(t *testing.T) {
 	// affected.
 	styles := []Style{
 		New().Bold(true),
-		New().Dim(true),
-		New().Underline(true),
 		New().Foreground("#9ca3af"),
 		New().Bold(true).Foreground("#a78bfa"),
 	}
@@ -211,21 +187,12 @@ func TestStyleImmutability(t *testing.T) {
 	t.Parallel()
 	base := New().Foreground("#22c55e")
 	bold := base.Bold(true)
-	dim := base.Dim(true)
 
-	// base must not gain bold or dim from derived styles.
 	baseOut := base.Render("a")
 	boldOut := bold.Render("a")
-	dimOut := dim.Render("a")
 
 	if baseOut == boldOut {
 		t.Errorf("base and bold produced identical output %q; Bold() mutated base", baseOut)
-	}
-	if baseOut == dimOut {
-		t.Errorf("base and dim produced identical output %q; Dim() mutated base", baseOut)
-	}
-	if boldOut == dimOut {
-		t.Errorf("bold and dim produced identical output %q", boldOut)
 	}
 }
 
