@@ -116,98 +116,6 @@ func TestNew_EmptyResolvers(t *testing.T) {
 	}
 }
 
-// ─── View ─────────────────────────────────────────────────────────────────────
-
-func TestView_NoPendingResolvers(t *testing.T) {
-	t.Parallel()
-
-	rs := []resolver.Resolver{
-		makeResolver("8.8.8.8", "Google Primary", "Anycast", "Global", "Global"),
-		makeResolver("1.1.1.1", "Cloudflare Primary", "Anycast", "Global", "Global"),
-	}
-	chk := checker.New(checker.Config{Domain: "example.com", RecordType: 1, Resolvers: rs})
-	m := New("example.com", "A", rs, chk)
-
-	out := m.View()
-
-	if out == "" {
-		t.Fatal("View returned empty string for no-results state")
-	}
-	if !strings.Contains(out, "example.com") {
-		t.Error("View output missing domain name")
-	}
-	if !strings.Contains(out, "checking...") {
-		t.Error("View output missing 'checking...' status for in-progress state")
-	}
-}
-
-func TestView_PartialResults(t *testing.T) {
-	t.Parallel()
-
-	rs := []resolver.Resolver{
-		makeResolver("8.8.8.8", "Google Primary", "Anycast", "Global", "Global"),
-		makeResolver("1.1.1.1", "Cloudflare Primary", "Anycast", "Global", "Global"),
-	}
-	chk := checker.New(checker.Config{Domain: "partial.com", RecordType: 1, Resolvers: rs})
-	m := New("partial.com", "A", rs, chk)
-
-	m.mu.Lock()
-	m.results["8.8.8.8"] = successResult(rs[0], []string{"93.184.216.34"}, 30*time.Millisecond)
-	m.mu.Unlock()
-
-	out := m.View()
-
-	if !strings.Contains(out, "partial.com") {
-		t.Error("View output missing domain for partial results state")
-	}
-	if !strings.Contains(out, "checking...") {
-		t.Error("View output should show 'checking...' while not done")
-	}
-}
-
-func TestView_AllResultsDone(t *testing.T) {
-	t.Parallel()
-
-	r := makeResolver("8.8.8.8", "Google Primary", "Anycast", "Global", "Global")
-	rs := []resolver.Resolver{r}
-	chk := checker.New(checker.Config{Domain: "done.com", RecordType: 1, Resolvers: rs})
-	m := New("done.com", "A", rs, chk)
-
-	m.mu.Lock()
-	m.results["8.8.8.8"] = successResult(r, []string{"1.2.3.4"}, 20*time.Millisecond)
-	m.consensus = []string{"1.2.3.4"}
-	m.done = true
-	m.mu.Unlock()
-
-	out := m.View()
-
-	if !strings.Contains(out, "completed in") {
-		t.Error("View output should contain 'completed in' when done=true")
-	}
-	if !strings.Contains(out, "press q to exit") {
-		t.Error("View output should contain quit hint")
-	}
-}
-
-func TestView_ContainsDomainAndType(t *testing.T) {
-	t.Parallel()
-
-	rs := []resolver.Resolver{
-		makeResolver("1.0.0.1", "CF Secondary", "Anycast", "Global", "Global"),
-	}
-	chk := checker.New(checker.Config{Domain: "mysite.io", RecordType: 28, Resolvers: rs})
-	m := New("mysite.io", "AAAA", rs, chk)
-
-	out := m.View()
-
-	if !strings.Contains(out, "mysite.io") {
-		t.Error("View output missing domain 'mysite.io'")
-	}
-	if !strings.Contains(out, "AAAA") {
-		t.Error("View output missing record type 'AAAA'")
-	}
-}
-
 // ─── groupByContinent ─────────────────────────────────────────────────────────
 
 func TestGroupByContinent(t *testing.T) {
@@ -1015,7 +923,7 @@ func TestRenderRow_Pending(t *testing.T) {
 
 	r := makeResolver("1.1.1.1", "Cloudflare Primary", "Anycast", "Global", "Global")
 
-	got := renderRow(r, query.Result{}, false, nil)
+	got := renderRow(r, query.Result{}, false, nil, false)
 
 	if got == "" {
 		t.Fatal("renderRow returned empty string for pending state")
@@ -1036,7 +944,7 @@ func TestRenderRow_Success_MatchesConsensus(t *testing.T) {
 	result := successResult(r, []string{"1.2.3.4"}, 25*time.Millisecond)
 	consensus := []string{"1.2.3.4"}
 
-	got := renderRow(r, result, true, consensus)
+	got := renderRow(r, result, true, consensus, true)
 
 	if !strings.Contains(got, "1.2.3.4") {
 		t.Errorf("renderRow success: expected answer in output, got: %q", got)
@@ -1053,7 +961,7 @@ func TestRenderRow_Success_Divergent(t *testing.T) {
 	result := successResult(r, []string{"9.9.9.9"}, 30*time.Millisecond)
 	consensus := []string{"1.2.3.4"} // different from result
 
-	got := renderRow(r, result, true, consensus)
+	got := renderRow(r, result, true, consensus, true)
 
 	// Divergent row should still contain the answer.
 	if !strings.Contains(got, "9.9.9.9") {
@@ -1067,7 +975,7 @@ func TestRenderRow_Timeout(t *testing.T) {
 	r := makeResolver("1.0.0.1", "CF Secondary", "Anycast", "Global", "Global")
 	result := timeoutResult(r)
 
-	got := renderRow(r, result, true, nil)
+	got := renderRow(r, result, true, nil, false)
 
 	if !strings.Contains(got, "timeout") {
 		t.Errorf("renderRow timeout: expected 'timeout' in output, got: %q", got)
@@ -1080,7 +988,7 @@ func TestRenderRow_Error(t *testing.T) {
 	r := makeResolver("9.9.9.9", "Quad9", "Anycast", "Global", "Global")
 	result := errorResult(r, "connection refused")
 
-	got := renderRow(r, result, true, nil)
+	got := renderRow(r, result, true, nil, false)
 
 	if !strings.Contains(got, "connection refused") {
 		t.Errorf("renderRow error: expected error message in output, got: %q", got)
@@ -1097,7 +1005,7 @@ func TestRenderRow_ErrorStatus_NoErrorField(t *testing.T) {
 		Error:    nil,
 	}
 
-	got := renderRow(r, result, true, nil)
+	got := renderRow(r, result, true, nil, false)
 
 	// When Status==Error but Error field is nil, "error" is used as the message.
 	if !strings.Contains(got, "error") {
@@ -1111,7 +1019,7 @@ func TestRenderRow_LongNameTruncated(t *testing.T) {
 	longName := strings.Repeat("A", colWidthName+10)
 	r := makeResolver("10.0.0.1", longName, "City", "Country", "Europe")
 
-	got := renderRow(r, query.Result{}, false, nil)
+	got := renderRow(r, query.Result{}, false, nil, false)
 
 	// The name cell must not exceed colWidthName visible characters.
 	// Find it in the output (it starts after rowIndent, at the beginning of the row).
@@ -1126,7 +1034,7 @@ func TestRenderRow_StartsWithIndent(t *testing.T) {
 
 	r := makeResolver("1.1.1.1", "CF", "A", "G", "Global")
 
-	got := renderRow(r, query.Result{}, false, nil)
+	got := renderRow(r, query.Result{}, false, nil, false)
 
 	if !strings.HasPrefix(got, rowIndent) {
 		t.Errorf("renderRow should start with rowIndent %q", rowIndent)
@@ -1135,114 +1043,14 @@ func TestRenderRow_StartsWithIndent(t *testing.T) {
 
 // ─── viewState rendering ──────────────────────────────────────────────────────
 
-func TestViewState_Render_NoResolvers(t *testing.T) {
-	t.Parallel()
-
-	v := &viewState{
-		domain:     "empty.com",
-		recordType: "A",
-		resolvers:  nil,
-		results:    map[string]query.Result{},
-		consensus:  nil,
-		done:       false,
-		startTime:  time.Now(),
-	}
-
-	got := v.render()
-
-	if got == "" {
-		t.Fatal("viewState.render() returned empty string")
-	}
-	if !strings.Contains(got, "empty.com") {
-		t.Error("render output missing domain name")
-	}
-}
-
-func TestViewState_Render_Done(t *testing.T) {
-	t.Parallel()
-
-	r := makeResolver("1.1.1.1", "CF", "Anycast", "Global", "Global")
-	v := &viewState{
-		domain:     "done.io",
-		recordType: "AAAA",
-		resolvers:  []resolver.Resolver{r},
-		results: map[string]query.Result{
-			"1.1.1.1": successResult(r, []string{"2001:db8::1"}, 15*time.Millisecond),
-		},
-		consensus: []string{"2001:db8::1"},
-		done:      true,
-		startTime: time.Now().Add(-500 * time.Millisecond),
-	}
-
-	got := v.render()
-
-	if !strings.Contains(got, "completed in") {
-		t.Error("render done=true should contain 'completed in'")
-	}
-	if !strings.Contains(got, "press q to exit") {
-		t.Error("render should contain quit hint")
-	}
-}
-
-func TestViewState_RenderHeader_CheckingStatus(t *testing.T) {
-	t.Parallel()
-
-	v := &viewState{
-		domain:     "checking.com",
-		recordType: "MX",
-		resolvers:  []resolver.Resolver{makeResolver("1.1.1.1", "CF", "A", "G", "Global")},
-		results:    map[string]query.Result{},
-		done:       false,
-		startTime:  time.Now(),
-	}
-
-	got := v.renderHeader()
-
-	if !strings.Contains(got, "checking.com") {
-		t.Error("renderHeader missing domain")
-	}
-	if !strings.Contains(got, "MX") {
-		t.Error("renderHeader missing record type")
-	}
-	if !strings.Contains(got, "checking...") {
-		t.Error("renderHeader should show 'checking...' when not done")
-	}
-}
-
-func TestViewState_RenderHeader_CompleteStatus(t *testing.T) {
-	t.Parallel()
-
-	r := makeResolver("1.1.1.1", "CF", "Anycast", "Global", "Global")
-	v := &viewState{
-		domain:     "done.net",
-		recordType: "A",
-		resolvers:  []resolver.Resolver{r},
-		results: map[string]query.Result{
-			"1.1.1.1": successResult(r, []string{"1.2.3.4"}, 10*time.Millisecond),
-		},
-		consensus: []string{"1.2.3.4"},
-		done:      true,
-		startTime: time.Now(),
-	}
-
-	got := v.renderHeader()
-
-	if !strings.Contains(got, "complete") {
-		t.Error("renderHeader done=true should show 'complete'")
-	}
-}
-
 func TestViewState_RenderFooter_NilConsensus(t *testing.T) {
 	t.Parallel()
 
 	r := makeResolver("1.1.1.1", "CF", "Anycast", "Global", "Global")
 	v := &viewState{
-		domain:     "x.com",
-		recordType: "A",
-		resolvers:  []resolver.Resolver{r},
-		results:    map[string]query.Result{},
-		consensus:  nil,
-		startTime:  time.Now(),
+		resolvers: []resolver.Resolver{r},
+		results:   map[string]query.Result{},
+		startTime: time.Now(),
 	}
 
 	got := v.renderFooter()
@@ -1263,13 +1071,10 @@ func TestViewState_RenderFooter_WithConsensus(t *testing.T) {
 
 	r := makeResolver("1.1.1.1", "CF", "Anycast", "Global", "Global")
 	v := &viewState{
-		domain:     "x.com",
-		recordType: "A",
-		resolvers:  []resolver.Resolver{r},
+		resolvers: []resolver.Resolver{r},
 		results: map[string]query.Result{
 			"1.1.1.1": successResult(r, []string{"1.2.3.4"}, 5*time.Millisecond),
 		},
-		consensus: []string{"1.2.3.4"},
 		startTime: time.Now(),
 	}
 
@@ -1277,500 +1082,6 @@ func TestViewState_RenderFooter_WithConsensus(t *testing.T) {
 
 	if !strings.Contains(got, "1.2.3.4") {
 		t.Error("renderFooter should display consensus answer")
-	}
-}
-
-func TestViewState_RenderTable_MultipleContents(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1", "Cloudflare Primary", "Anycast", "Global", "Global")
-	r2 := makeResolver("8.8.8.8", "Google Primary", "Anycast", "Global", "Global")
-	r3 := makeResolver("84.200.69.80", "DNS.WATCH Primary", "Dusseldorf", "Germany", "Europe")
-
-	v := &viewState{
-		domain:     "multi.com",
-		recordType: "A",
-		resolvers:  []resolver.Resolver{r1, r2, r3},
-		results: map[string]query.Result{
-			"1.1.1.1":     successResult(r1, []string{"1.2.3.4"}, 10*time.Millisecond),
-			"84.200.69.80": errorResult(r3, "connection refused"),
-		},
-		consensus: []string{"1.2.3.4"},
-		startTime: time.Now(),
-	}
-
-	got := v.renderTable()
-
-	// Both continent headers should appear.
-	if !strings.Contains(got, "Global") {
-		t.Error("renderTable should contain 'Global' continent header")
-	}
-	if !strings.Contains(got, "Europe") {
-		t.Error("renderTable should contain 'Europe' continent header")
-	}
-	// Column headers always appear.
-	if !strings.Contains(got, "Resolver") {
-		t.Error("renderTable should contain column header 'Resolver'")
-	}
-}
-
-// ─── propagationPct ───────────────────────────────────────────────────────────
-
-func TestViewState_PropagationPct_NoResolvers(t *testing.T) {
-	t.Parallel()
-
-	v := &viewState{
-		resolvers: nil,
-		consensus: []string{"1.2.3.4"},
-		results:   map[string]query.Result{},
-	}
-
-	got := v.propagationPct()
-	if got != 0 {
-		t.Errorf("propagationPct with no resolvers = %.2f, want 0", got)
-	}
-}
-
-func TestViewState_PropagationPct_NoConsensus(t *testing.T) {
-	t.Parallel()
-
-	r := makeResolver("1.1.1.1", "CF", "A", "G", "Global")
-	v := &viewState{
-		resolvers: []resolver.Resolver{r},
-		consensus: nil,
-		results: map[string]query.Result{
-			"1.1.1.1": successResult(r, []string{"1.2.3.4"}, 5*time.Millisecond),
-		},
-	}
-
-	got := v.propagationPct()
-	if got != 0 {
-		t.Errorf("propagationPct with nil consensus = %.2f, want 0", got)
-	}
-}
-
-func TestViewState_PropagationPct_AllMatch(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1", "CF", "A", "G", "Global")
-	r2 := makeResolver("8.8.8.8", "G", "A", "G", "Global")
-	v := &viewState{
-		resolvers: []resolver.Resolver{r1, r2},
-		consensus: []string{"1.2.3.4"},
-		results: map[string]query.Result{
-			"1.1.1.1": successResult(r1, []string{"1.2.3.4"}, 5*time.Millisecond),
-			"8.8.8.8": successResult(r2, []string{"1.2.3.4"}, 10*time.Millisecond),
-		},
-	}
-
-	got := v.propagationPct()
-	if got != 100 {
-		t.Errorf("propagationPct all matching = %.2f, want 100", got)
-	}
-}
-
-func TestViewState_PropagationPct_HalfMatch(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1", "CF", "A", "G", "Global")
-	r2 := makeResolver("8.8.8.8", "G", "A", "G", "Global")
-	v := &viewState{
-		resolvers: []resolver.Resolver{r1, r2},
-		consensus: []string{"1.2.3.4"},
-		results: map[string]query.Result{
-			"1.1.1.1": successResult(r1, []string{"1.2.3.4"}, 5*time.Millisecond),
-			"8.8.8.8": successResult(r2, []string{"9.9.9.9"}, 10*time.Millisecond),
-		},
-	}
-
-	got := v.propagationPct()
-	if got != 50 {
-		t.Errorf("propagationPct half match = %.2f, want 50", got)
-	}
-}
-
-func TestViewState_PropagationPct_PendingResolversCountAgainst(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1", "CF", "A", "G", "Global")
-	r2 := makeResolver("8.8.8.8", "G", "A", "G", "Global")
-	// r2 has no result yet (pending)
-	v := &viewState{
-		resolvers: []resolver.Resolver{r1, r2},
-		consensus: []string{"1.2.3.4"},
-		results: map[string]query.Result{
-			"1.1.1.1": successResult(r1, []string{"1.2.3.4"}, 5*time.Millisecond),
-		},
-	}
-
-	got := v.propagationPct()
-	// 1 matching out of 2 total resolvers = 50%
-	if got != 50 {
-		t.Errorf("propagationPct with pending resolver = %.2f, want 50", got)
-	}
-}
-
-// ─── min helper ───────────────────────────────────────────────────────────────
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// ─── streamResults ────────────────────────────────────────────────────────────
-
-// newTestModel builds a minimal Model suitable for streamResults tests. It
-// uses a checker.Checker that has no resolvers so that its Stream channel
-// closes immediately if ever called; the tests inject their own channels.
-func newTestModel(resolvers []resolver.Resolver) *Model {
-	chk := checker.New(checker.Config{
-		Domain:     "test.example.com",
-		RecordType: 1,
-		Resolvers:  resolvers,
-	})
-	return New("test.example.com", "A", resolvers, chk)
-}
-
-// sendAndClose sends all results to ch and then closes it, simulating a
-// completed checker.Stream. It is safe to call in a goroutine.
-func sendAndClose(ch chan<- query.Result, results []query.Result) {
-	for _, r := range results {
-		ch <- r
-	}
-	close(ch)
-}
-
-func TestStreamResults_EmptyChannel_SetsDone(t *testing.T) {
-	t.Parallel()
-
-	m := newTestModel(nil)
-
-	ch := make(chan query.Result)
-	close(ch) // immediately closed — no results
-
-	m.streamResults(ch)
-
-	m.mu.Lock()
-	done := m.done
-	resultCount := len(m.results)
-	m.mu.Unlock()
-
-	if !done {
-		t.Error("streamResults: done should be true after channel closes")
-	}
-	if resultCount != 0 {
-		t.Errorf("streamResults: expected 0 results, got %d", resultCount)
-	}
-}
-
-func TestStreamResults_SingleResult_UpdatesModelState(t *testing.T) {
-	t.Parallel()
-
-	r := makeResolver("1.1.1.1", "Cloudflare Primary", "Anycast", "Global", "Global")
-	m := newTestModel([]resolver.Resolver{r})
-
-	ch := make(chan query.Result, 1)
-	ch <- successResult(r, []string{"1.2.3.4"}, 20*time.Millisecond)
-	close(ch)
-
-	m.streamResults(ch)
-
-	m.mu.Lock()
-	got, ok := m.results["1.1.1.1"]
-	consensus := m.consensus
-	done := m.done
-	m.mu.Unlock()
-
-	if !ok {
-		t.Fatal("streamResults: result for 1.1.1.1 not found in model")
-	}
-	if got.Resolver.IP != "1.1.1.1" {
-		t.Errorf("streamResults: result resolver IP = %q, want 1.1.1.1", got.Resolver.IP)
-	}
-	if len(consensus) == 0 {
-		t.Error("streamResults: consensus should be non-empty after one successful result")
-	}
-	if consensus[0] != "1.2.3.4" {
-		t.Errorf("streamResults: consensus[0] = %q, want 1.2.3.4", consensus[0])
-	}
-	if !done {
-		t.Error("streamResults: done should be true after channel closes")
-	}
-}
-
-func TestStreamResults_MultipleResults_AllStoredAndConsensusComputed(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1", "Cloudflare Primary", "Anycast", "Global", "Global")
-	r2 := makeResolver("8.8.8.8", "Google Primary", "Anycast", "Global", "Global")
-	r3 := makeResolver("9.9.9.9", "Quad9", "Anycast", "Global", "Global")
-
-	m := newTestModel([]resolver.Resolver{r1, r2, r3})
-
-	// Two resolvers return "5.5.5.5" — that should be the consensus.
-	results := []query.Result{
-		successResult(r1, []string{"5.5.5.5"}, 10*time.Millisecond),
-		successResult(r2, []string{"5.5.5.5"}, 15*time.Millisecond),
-		successResult(r3, []string{"9.9.9.9"}, 20*time.Millisecond),
-	}
-
-	ch := make(chan query.Result, len(results))
-	sendAndClose(ch, results)
-
-	m.streamResults(ch)
-
-	m.mu.Lock()
-	resultCount := len(m.results)
-	consensus := m.consensus
-	done := m.done
-	m.mu.Unlock()
-
-	if resultCount != 3 {
-		t.Errorf("streamResults: expected 3 results, got %d", resultCount)
-	}
-	if !done {
-		t.Error("streamResults: done should be true after channel closes")
-	}
-	if len(consensus) == 0 {
-		t.Fatal("streamResults: consensus must not be empty")
-	}
-	if consensus[0] != "5.5.5.5" {
-		t.Errorf("streamResults: consensus[0] = %q, want 5.5.5.5", consensus[0])
-	}
-}
-
-func TestStreamResults_DoneSetAfterChannelClose(t *testing.T) {
-	t.Parallel()
-
-	r := makeResolver("8.8.4.4", "Google Secondary", "Anycast", "Global", "Global")
-	m := newTestModel([]resolver.Resolver{r})
-
-	ch := make(chan query.Result, 1)
-
-	// Verify done is false before streaming.
-	m.mu.Lock()
-	if m.done {
-		t.Error("done should be false before streamResults")
-	}
-	m.mu.Unlock()
-
-	ch <- successResult(r, []string{"1.2.3.4"}, 5*time.Millisecond)
-	close(ch)
-
-	m.streamResults(ch)
-
-	m.mu.Lock()
-	done := m.done
-	m.mu.Unlock()
-
-	if !done {
-		t.Error("streamResults: done must be true after channel closes")
-	}
-}
-
-func TestStreamResults_TimeoutResult_StoredCorrectly(t *testing.T) {
-	t.Parallel()
-
-	r := makeResolver("1.0.0.1", "Cloudflare Secondary", "Anycast", "Global", "Global")
-	m := newTestModel([]resolver.Resolver{r})
-
-	ch := make(chan query.Result, 1)
-	ch <- timeoutResult(r)
-	close(ch)
-
-	m.streamResults(ch)
-
-	m.mu.Lock()
-	got, ok := m.results["1.0.0.1"]
-	done := m.done
-	m.mu.Unlock()
-
-	if !ok {
-		t.Fatal("streamResults: timeout result not found in model")
-	}
-	if got.Status != query.Timeout {
-		t.Errorf("streamResults: result status = %v, want Timeout", got.Status)
-	}
-	if !done {
-		t.Error("streamResults: done should be true after channel closes")
-	}
-}
-
-func TestStreamResults_ErrorResult_StoredCorrectly(t *testing.T) {
-	t.Parallel()
-
-	r := makeResolver("84.200.69.80", "DNS.WATCH Primary", "Dusseldorf", "Germany", "Europe")
-	m := newTestModel([]resolver.Resolver{r})
-
-	ch := make(chan query.Result, 1)
-	ch <- errorResult(r, "connection refused")
-	close(ch)
-
-	m.streamResults(ch)
-
-	m.mu.Lock()
-	got, ok := m.results["84.200.69.80"]
-	done := m.done
-	m.mu.Unlock()
-
-	if !ok {
-		t.Fatal("streamResults: error result not found in model")
-	}
-	if got.Status != query.Error {
-		t.Errorf("streamResults: result status = %v, want Error", got.Status)
-	}
-	if got.Error == nil || got.Error.Error() != "connection refused" {
-		t.Errorf("streamResults: result error = %v, want 'connection refused'", got.Error)
-	}
-	if !done {
-		t.Error("streamResults: done should be true after channel closes")
-	}
-}
-
-func TestStreamResults_ConsensusUpdatedIncrementally(t *testing.T) {
-	t.Parallel()
-
-	r1 := makeResolver("1.1.1.1", "CF", "Anycast", "Global", "Global")
-	r2 := makeResolver("8.8.8.8", "Google", "Anycast", "Global", "Global")
-	m := newTestModel([]resolver.Resolver{r1, r2})
-
-	// Use an unbuffered channel so we can observe intermediate state.
-	ch := make(chan query.Result)
-
-	doneCh := make(chan struct{})
-	go func() {
-		defer close(doneCh)
-		m.streamResults(ch)
-	}()
-
-	// Send the first result and check interim consensus.
-	ch <- successResult(r1, []string{"1.2.3.4"}, 10*time.Millisecond)
-
-	// Give the goroutine time to process the result. We poll with a short
-	// sleep on each iteration so the scheduler can run the streaming goroutine
-	// between our lock acquisitions, avoiding a busy-wait that races against
-	// the goroutine on single-core or heavily loaded machines.
-	for range 200 {
-		m.mu.Lock()
-		count := len(m.results)
-		m.mu.Unlock()
-		if count == 1 {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-
-	m.mu.Lock()
-	intermediateConsensus := m.consensus
-	m.mu.Unlock()
-
-	if len(intermediateConsensus) == 0 {
-		t.Error("streamResults: consensus should be non-empty after first result")
-	}
-
-	// Send the second result and close.
-	ch <- successResult(r2, []string{"1.2.3.4"}, 15*time.Millisecond)
-	close(ch)
-
-	<-doneCh
-
-	m.mu.Lock()
-	finalConsensus := m.consensus
-	done := m.done
-	m.mu.Unlock()
-
-	if len(finalConsensus) == 0 {
-		t.Error("streamResults: final consensus should be non-empty")
-	}
-	if !done {
-		t.Error("streamResults: done should be true after channel closes")
-	}
-}
-
-func TestStreamResults_ViewUpdatesAfterResults(t *testing.T) {
-	t.Parallel()
-
-	r := makeResolver("8.8.8.8", "Google Primary", "Anycast", "Global", "Global")
-	m := newTestModel([]resolver.Resolver{r})
-
-	// Capture the view before any results arrive.
-	viewBefore := m.View()
-
-	ch := make(chan query.Result, 1)
-	ch <- successResult(r, []string{"203.0.113.1"}, 30*time.Millisecond)
-	close(ch)
-
-	m.streamResults(ch)
-
-	viewAfter := m.View()
-
-	if viewBefore == "" {
-		t.Fatal("View before results must not be empty")
-	}
-	if viewAfter == "" {
-		t.Fatal("View after results must not be empty")
-	}
-	// After results arrive the view should contain the resolved IP.
-	if !strings.Contains(viewAfter, "203.0.113.1") {
-		t.Errorf("View after streamResults should contain resolved IP, got:\n%s", viewAfter)
-	}
-	// After channel close the view should show the completed state.
-	if !strings.Contains(viewAfter, "completed in") {
-		t.Errorf("View after streamResults should show 'completed in', got:\n%s", viewAfter)
-	}
-}
-
-func TestStreamResults_ConcurrentViewIsSafe(t *testing.T) {
-	// This test is intentionally not parallel at the top level so the race
-	// detector can catch any data race introduced by concurrent reads and
-	// writes across goroutines.
-	r1 := makeResolver("1.1.1.1", "CF", "Anycast", "Global", "Global")
-	r2 := makeResolver("8.8.8.8", "Google", "Anycast", "Global", "Global")
-	r3 := makeResolver("9.9.9.9", "Quad9", "Anycast", "Global", "Global")
-
-	m := newTestModel([]resolver.Resolver{r1, r2, r3})
-
-	results := []query.Result{
-		successResult(r1, []string{"1.2.3.4"}, 10*time.Millisecond),
-		successResult(r2, []string{"1.2.3.4"}, 20*time.Millisecond),
-		successResult(r3, []string{"5.6.7.8"}, 30*time.Millisecond),
-	}
-
-	ch := make(chan query.Result, len(results))
-	sendAndClose(ch, results)
-
-	streamDone := make(chan struct{})
-	go func() {
-		defer close(streamDone)
-		m.streamResults(ch)
-	}()
-
-	// Concurrently call View while streamResults is running to exercise the
-	// mutex and ensure the race detector finds no issues.
-	viewDone := make(chan struct{})
-	go func() {
-		defer close(viewDone)
-		for range 200 {
-			_ = m.View()
-		}
-	}()
-
-	<-streamDone
-	<-viewDone
-
-	// Final state assertions.
-	m.mu.Lock()
-	done := m.done
-	resultCount := len(m.results)
-	m.mu.Unlock()
-
-	if !done {
-		t.Error("streamResults: done should be true after channel closes")
-	}
-	if resultCount != 3 {
-		t.Errorf("streamResults: expected 3 results, got %d", resultCount)
 	}
 }
 
@@ -2047,8 +1358,6 @@ func TestPrintFooter_ContainsSummaryLabels(t *testing.T) {
 
 	m.mu.Lock()
 	m.results["1.1.1.1"] = successResult(r, []string{"1.2.3.4"}, 10*time.Millisecond)
-	m.consensus = []string{"1.2.3.4"}
-	m.done = true
 	m.mu.Unlock()
 
 	m.printFooter()
@@ -2072,8 +1381,6 @@ func TestPrintFooter_ContainsConsensusAnswer(t *testing.T) {
 
 	m.mu.Lock()
 	m.results["8.8.8.8"] = successResult(r, []string{"203.0.113.42"}, 5*time.Millisecond)
-	m.consensus = []string{"203.0.113.42"}
-	m.done = true
 	m.mu.Unlock()
 
 	m.printFooter()

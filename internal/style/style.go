@@ -22,10 +22,8 @@ var ansiEscapeRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 // Instances are safe for concurrent use because every mutating method copies
 // the receiver before returning.
 type Style struct {
-	fg        string // ANSI color parameter fragment, e.g. "38;2;34;197;94"
-	bold      bool
-	dim       bool
-	underline bool
+	fg   string
+	bold bool
 }
 
 // New returns a new empty Style with no attributes set.
@@ -52,22 +50,6 @@ func (s Style) Bold(on bool) Style {
 	return out
 }
 
-// Dim returns a copy of s with dim/faint text enabled when on is true, or
-// disabled when on is false.
-func (s Style) Dim(on bool) Style {
-	out := s
-	out.dim = on
-	return out
-}
-
-// Underline returns a copy of s with underline enabled when on is true, or
-// disabled when on is false.
-func (s Style) Underline(on bool) Style {
-	out := s
-	out.underline = on
-	return out
-}
-
 // Render applies the style attributes to text and returns the result
 // surrounded by the appropriate ANSI escape sequences. If no attributes are
 // set the original text is returned unchanged (no escape sequences emitted).
@@ -76,12 +58,6 @@ func (s Style) Render(text string) string {
 
 	if s.bold {
 		params = append(params, "1")
-	}
-	if s.dim {
-		params = append(params, "2")
-	}
-	if s.underline {
-		params = append(params, "4")
 	}
 	if s.fg != "" {
 		params = append(params, s.fg)

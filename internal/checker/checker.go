@@ -203,104 +203,53 @@ func (c *Checker) Results() []query.Result {
 	return out
 }
 
-// PropagationPercentage returns the proportion of successful results that
-// agree with the consensus answer, expressed as a value between 0 and 100.
-//
-// The consensus answer is the most commonly observed set of records across all
-// successful results (see ConsensusRecords). Resolvers that returned an error
-// are excluded from both the numerator and denominator so that network
-// failures do not artificially deflate the propagation percentage.
-//
-// Returns 0 if there are no successful results.
-func PropagationPercentage(results []query.Result) float64 {
-	consensus := ConsensusRecords(results)
-	consensusKey := joinRecords(consensus)
-
-	var successCount, matchCount int
+func PropagationStats(results []query.Result) (pct float64, consensus []string, majority bool) {
+	counts := make(map[string]int)
+	sets := make(map[string][]string)
+	successes := 0
 
 	for _, r := range results {
-		if r.Error != nil {
-			slog.Debug("checker: skipping errored result in propagation calculation",
-				slog.String("resolver", r.Resolver.IP),
-				slog.String("error", r.Error.Error()),
-			)
+		if r.Status != query.Success {
 			continue
 		}
-
-		successCount++
-
-		sorted := sortedCopy(r.Records)
-		if joinRecords(sorted) == consensusKey {
-			matchCount++
-		}
-	}
-
-	if successCount == 0 {
-		slog.Debug("checker: no successful results, propagation is 0%")
-		return 0
-	}
-
-	pct := float64(matchCount) / float64(successCount) * 100
-
-	slog.Info("checker: propagation percentage calculated",
-		slog.Int("successful_resolvers", successCount),
-		slog.Int("matching_resolvers", matchCount),
-		slog.Float64("percentage", pct),
-	)
-
-	return pct
-}
-
-// ConsensusRecords returns the most commonly observed set of DNS records
-// across all successful results. Records within each result are sorted before
-// comparison so that ordering differences between resolvers do not create
-// false disagreement.
-//
-// When there is a tie between two equally common answers, the lexicographically
-// smaller joined string is chosen for determinism. Returns nil when there are
-// no successful results.
-func ConsensusRecords(results []query.Result) []string {
-	// Tally occurrences of each unique sorted answer.
-	tally := make(map[string]int)
-	canonical := make(map[string][]string) // key → original sorted records
-
-	for _, r := range results {
-		if r.Error != nil {
-			continue
-		}
-
-		sorted := sortedCopy(r.Records)
-		key := joinRecords(sorted)
-		tally[key]++
-		canonical[key] = sorted
-	}
-
-	if len(tally) == 0 {
-		slog.Debug("checker: no successful results for consensus calculation")
-		return nil
+		successes++
+		set := sortedCopy(r.Records)
+		key := joinRecords(set)
+		counts[key]++
+		sets[key] = set
 	}
 
 	var bestKey string
 	var bestCount int
-
-	for key, count := range tally {
-		switch {
-		case count > bestCount:
-			bestCount = count
-			bestKey = key
-		case count == bestCount && key < bestKey:
-			// Tie-break lexicographically for determinism.
-			bestKey = key
+	for key, count := range counts {
+		if count > bestCount {
+			bestKey, bestCount = key, count
 		}
 	}
 
-	slog.Info("checker: consensus records determined",
-		slog.Int("unique_answers", len(tally)),
-		slog.Int("consensus_count", bestCount),
-		slog.Int("consensus_records", len(canonical[bestKey])),
+	if bestCount == 0 {
+		slog.Debug("checker: no successful results for propagation stats",
+			slog.Int("results", len(results)),
+		)
+		return 0, nil, false
+	}
+
+	pct = float64(bestCount) / float64(len(results)) * 100
+	majority = bestCount > len(results)/2
+	if majority {
+		consensus = sets[bestKey]
+	}
+
+	slog.Info("checker: propagation stats computed",
+		slog.Int("results", len(results)),
+		slog.Int("successes", successes),
+		slog.Int("distinct_sets", len(counts)),
+		slog.Int("largest_set_count", bestCount),
+		slog.Float64("pct", pct),
+		slog.Bool("majority", majority),
 	)
 
-	return canonical[bestKey]
+	return pct, consensus, majority
 }
 
 // sortedCopy returns a sorted copy of records so the original slice is not

@@ -7,6 +7,7 @@ package dns
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
@@ -164,6 +165,14 @@ func Query(ctx context.Context, resolverIP string, domain string, qtype uint16) 
 	response := buf[:n]
 
 	records, err := parseResponse(response)
+	var failure rcodeError
+	if errors.As(err, &failure) {
+		log.Warn("dns: server answered with a failure code",
+			slog.String("error", failure.Error()),
+			slog.Duration("latency", latency),
+		)
+		return nil, latency, failure
+	}
 	if err != nil {
 		log.Error("dns: response parse failed", slog.String("error", err.Error()))
 		return nil, latency, fmt.Errorf("dns: parse response: %w", err)
@@ -202,12 +211,12 @@ func buildQuery(domain string, qtype uint16) ([]byte, uint16) {
 	// |                    ARCOUNT                    |
 	// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 	header := make([]byte, 12)
-	binary.BigEndian.PutUint16(header[0:2], txID)    // ID
-	binary.BigEndian.PutUint16(header[2:4], 0x0100)  // Flags: RD=1
-	binary.BigEndian.PutUint16(header[4:6], 1)       // QDCOUNT
-	binary.BigEndian.PutUint16(header[6:8], 0)       // ANCOUNT
-	binary.BigEndian.PutUint16(header[8:10], 0)      // NSCOUNT
-	binary.BigEndian.PutUint16(header[10:12], 0)     // ARCOUNT
+	binary.BigEndian.PutUint16(header[0:2], txID)   // ID
+	binary.BigEndian.PutUint16(header[2:4], 0x0100) // Flags: RD=1
+	binary.BigEndian.PutUint16(header[4:6], 1)      // QDCOUNT
+	binary.BigEndian.PutUint16(header[6:8], 0)      // ANCOUNT
+	binary.BigEndian.PutUint16(header[8:10], 0)     // NSCOUNT
+	binary.BigEndian.PutUint16(header[10:12], 0)    // ARCOUNT
 
 	// Question section: encoded name + QTYPE (2 bytes) + QCLASS (2 bytes)
 	question := encodeName(domain)
@@ -269,12 +278,28 @@ func encodeName(domain string) []byte {
 	return buf
 }
 
-// parseResponse parses a raw DNS response packet and returns the answer
-// records. It handles DNS name compression pointers as specified in
-// RFC 1035 §4.1.4.
-//
-// Errors are returned for truncated packets, invalid offsets, or
-// compression pointer loops.
+const (
+	rcodeNoError  uint16 = 0
+	rcodeNXDomain uint16 = 3
+)
+
+var rcodeNames = map[uint16]string{
+	1: "FORMERR",
+	2: "SERVFAIL",
+	4: "NOTIMP",
+	5: "REFUSED",
+}
+
+type rcodeError uint16
+
+func (e rcodeError) Error() string {
+	name, ok := rcodeNames[uint16(e)]
+	if !ok {
+		name = fmt.Sprintf("RCODE%d", uint16(e))
+	}
+	return "dns: " + name
+}
+
 func parseResponse(data []byte) ([]Record, error) {
 	slog.Debug("dns: parsing response", slog.Int("bytes", len(data)))
 
@@ -282,23 +307,17 @@ func parseResponse(data []byte) ([]Record, error) {
 		return nil, fmt.Errorf("dns: response too short: %d bytes (minimum 12)", len(data))
 	}
 
-	// Header fields
-	// id     := binary.BigEndian.Uint16(data[0:2])  // not validated here
-	flags  := binary.BigEndian.Uint16(data[2:4])
+	flags := binary.BigEndian.Uint16(data[2:4])
 	qdcount := binary.BigEndian.Uint16(data[4:6])
 	ancount := binary.BigEndian.Uint16(data[6:8])
-	// nscount := binary.BigEndian.Uint16(data[8:10])   // not used
-	// arcount := binary.BigEndian.Uint16(data[10:12])  // not used
 
 	rcode := flags & 0x000F
-	if rcode != 0 {
-		slog.Warn("dns: server returned non-zero RCODE",
-			slog.Uint64("rcode", uint64(rcode)),
-			slog.Uint64("flags", uint64(flags)),
-		)
-		// Return empty records rather than an error for non-zero RCODEs so
-		// the caller can distinguish "no records" from a protocol failure.
+	if rcode == rcodeNXDomain {
+		slog.Debug("dns: server returned NXDOMAIN", slog.Uint64("flags", uint64(flags)))
 		return nil, nil
+	}
+	if rcode != rcodeNoError {
+		return nil, rcodeError(rcode)
 	}
 
 	slog.Debug("dns: response header parsed",
@@ -379,10 +398,10 @@ func parseRecord(data []byte, offset int) (Record, int, error) {
 		return Record{}, 0, fmt.Errorf("truncated record fixed fields at offset %d", offset)
 	}
 
-	rtype  := binary.BigEndian.Uint16(data[offset : offset+2])
+	rtype := binary.BigEndian.Uint16(data[offset : offset+2])
 	rclass := binary.BigEndian.Uint16(data[offset+2 : offset+4])
-	ttl    := binary.BigEndian.Uint32(data[offset+4 : offset+8])
-	rdlen  := int(binary.BigEndian.Uint16(data[offset+8 : offset+10]))
+	ttl := binary.BigEndian.Uint32(data[offset+4 : offset+8])
+	rdlen := int(binary.BigEndian.Uint16(data[offset+8 : offset+10]))
 	offset += 10
 
 	if offset+rdlen > len(data) {
@@ -528,10 +547,10 @@ func parseSOA(msg []byte, rdataOffset int, rdata []byte) (string, error) {
 			roffset, rdataEnd)
 	}
 
-	serial  := binary.BigEndian.Uint32(msg[roffset : roffset+4])
+	serial := binary.BigEndian.Uint32(msg[roffset : roffset+4])
 	refresh := binary.BigEndian.Uint32(msg[roffset+4 : roffset+8])
-	retry   := binary.BigEndian.Uint32(msg[roffset+8 : roffset+12])
-	expire  := binary.BigEndian.Uint32(msg[roffset+12 : roffset+16])
+	retry := binary.BigEndian.Uint32(msg[roffset+8 : roffset+12])
+	expire := binary.BigEndian.Uint32(msg[roffset+12 : roffset+16])
 	minimum := binary.BigEndian.Uint32(msg[roffset+16 : roffset+20])
 
 	return fmt.Sprintf("%s %s %d %d %d %d %d",

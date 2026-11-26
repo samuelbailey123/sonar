@@ -1,5 +1,3 @@
-![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)
-
 # sonar
 
 DNS propagation checker with live, global resolver coverage. Query your domain across 54 resolvers in 8 regions to see how DNS records propagate worldwide.
@@ -11,13 +9,13 @@ Sonar queries a domain across a curated list of public DNS resolvers distributed
 - Per-resolver query results with latency and geographic location
 - Consensus record set (the records agreed upon by the majority)
 
-Three output modes suit different workflows: interactive TUI for exploration, plain-text tables for CI/CD, and JSON for programmatic integration.
+Three output modes suit different workflows: an animated table in the terminal, a plain-text table for CI/CD, and JSON for programmatic integration.
 
 ## Features
 
 - **54 Global Resolvers** — coverage across North America, South America, Europe, Africa, Asia, Middle East, and Oceania
 - **Zero Dependencies** — custom RFC 1035 DNS client, no external packages
-- **Three Output Modes** — interactive TUI, plain-text table, or JSON for scripting
+- **Three Output Modes** — animated table, plain-text table, or JSON for scripting
 - **Concurrent Queries** — configurable worker pool with smart timeouts
 - **Consensus Detection** — automatic majority-vote analysis of record sets
 - **Structured Logging** — debug mode for troubleshooting propagation issues
@@ -41,13 +39,11 @@ make build
 ./sonar example.com
 ```
 
-### Binary Releases
-
-Download pre-built binaries for your OS from [GitHub Releases](https://github.com/samuelbailey123/sonar/releases).
-
 ## Usage
 
-### Basic Query (Interactive TUI)
+Flags go before the domain: `sonar [flags] <domain>`.
+
+### Basic Query
 
 ```bash
 sonar example.com
@@ -58,78 +54,67 @@ The default mode shows a banner, animates a spinner while queries run, then reve
 ### Plain-Text Output
 
 ```bash
-sonar example.com --no-tui
+sonar --no-tui example.com
 ```
 
-Output:
+Output, after the banner:
 ```
-   ███████  ██████  ███    ██  █████  ██████
-   ██      ██    ██ ████   ██ ██   ██ ██   ██
-   ███████ ██    ██ ██ ██  ██ ███████ ██████
-        ██ ██    ██ ██  ██ ██ ██   ██ ██   ██
-   ███████  ██████  ██   ████ ██   ██ ██   ██
-
-   DNS Propagation Checker  v0.1.0
-
 Querying example.com (A) across 54 resolvers...
 
-Resolver                      Location              Status Result                       Latency
-──────────────────────────────────────────────────────────────────────────────────────────────────────
-Google Public DNS Primary     Global, Anycast       ✓      93.184.216.34              12ms
-Cloudflare Primary            Global, Anycast       ✓      93.184.216.34              8ms
-Quad9 Primary                 Global, Anycast       ✓      93.184.216.34              10ms
-OpenDNS Primary               San Francisco, US     ✓      93.184.216.34              22ms
-Level3 Primary                Broomfield, US        ✓      93.184.216.34              14ms
-DNS.WATCH Primary             Düsseldorf, Germany   ✓      93.184.216.34              45ms
-Cloudflare Primary            Global, Anycast       ✓      93.184.216.34              9ms
-[... 47 more results ...]
+Resolver                     Location                 Status   Result                       Latency
+────────────────────────────────────────────────────────────────────────────────────────────────────
+FDN                          Paris, France            ✓ 172.66.147.243 +1            25ms
+Quad9 Primary                Global, Anycast          ✓ 172.66.147.243 +1            26ms
+Cloudflare Primary           Global, Anycast          ✓ 172.66.147.243 +1            27ms
+[... 51 more rows ...]
 
 Propagation: 100% (54/54 resolvers agree)
-Consensus:   93.184.216.34
+Consensus:   example.com. 212 IN A 104.20.23.154, example.com. 212 IN A 172.66.147.243
 ```
 
 ### JSON Output
 
 ```bash
-sonar example.com --json | jq .
+sonar --json example.com | jq .
 ```
 
-Output:
+Output, trimmed to two results:
 ```json
 {
   "domain": "example.com",
   "record_type": "A",
-  "timestamp": "2024-03-15T14:22:33Z",
+  "timestamp": "2026-11-25T21:40:13.643284Z",
   "propagation_pct": 100,
   "consensus": [
-    "93.184.216.34"
+    "example.com. 212 IN A 104.20.23.154",
+    "example.com. 212 IN A 172.66.147.243"
   ],
   "results": [
     {
-      "resolver_name": "Google Public DNS Primary",
-      "resolver_ip": "8.8.8.8",
-      "country": "Global",
+      "resolver_name": "CleanBrowsing Primary",
+      "resolver_ip": "185.228.168.168",
+      "country": "United States",
       "city": "Anycast",
-      "continent": "Global",
+      "continent": "North America",
       "status": "success",
       "records": [
-        "example.com. 3599 IN A 93.184.216.34"
+        "example.com. 212 IN A 172.66.147.243",
+        "example.com. 212 IN A 104.20.23.154"
       ],
-      "latency_ms": 12,
-      "error": ""
+      "latency_ms": 3
     },
     {
-      "resolver_name": "Cloudflare Primary",
-      "resolver_ip": "1.1.1.1",
-      "country": "Global",
-      "city": "Anycast",
-      "continent": "Global",
+      "resolver_name": "Comodo Secure DNS Primary",
+      "resolver_ip": "8.26.56.26",
+      "country": "United States",
+      "city": "Clifton",
+      "continent": "North America",
       "status": "success",
       "records": [
-        "example.com. 3599 IN A 93.184.216.34"
+        "example.com. 212 IN A 172.66.147.243",
+        "example.com. 212 IN A 104.20.23.154"
       ],
-      "latency_ms": 8,
-      "error": ""
+      "latency_ms": 3
     }
   ]
 }
@@ -138,42 +123,44 @@ Output:
 ### Query Specific Record Types
 
 ```bash
-sonar example.com -t AAAA      # Query for IPv6 records
-sonar example.com -t MX        # Query for mail exchanger records
-sonar example.com -t NS        # Query for nameserver records
-sonar example.com -t TXT       # Query for TXT records
-sonar example.com -t CNAME     # Query for CNAME records
-sonar example.com -t SOA       # Query for SOA records
-sonar example.com -t PTR       # Query for PTR records
+sonar -t AAAA example.com      # Query for IPv6 records
+sonar -t MX example.com        # Query for mail exchanger records
+sonar -t NS example.com        # Query for nameserver records
+sonar -t TXT example.com       # Query for TXT records
+sonar -t CNAME example.com     # Query for CNAME records
+sonar -t SOA example.com       # Query for SOA records
+sonar -t PTR example.com       # Query for PTR records
 ```
 
 ### Control Concurrency
 
 ```bash
-sonar example.com -w 10    # Use 10 concurrent workers (default: 20)
-sonar example.com --workers 50
+sonar -w 10 example.com    # Use 10 concurrent workers (default: 20)
+sonar --workers 50 example.com
 ```
 
 ### Enable Debug Logging
 
 ```bash
-sonar example.com -v
-sonar example.com --verbose
+sonar -v example.com
+sonar --verbose example.com
 ```
 
 Outputs structured logs to stderr:
 ```
-time=2024-03-15T14:22:33.123Z level=DEBUG msg="cmd: flags parsed" record_type=A workers=20
-time=2024-03-15T14:22:33.124Z level=INFO msg="cmd: domain validated" domain=example.com
-time=2024-03-15T14:22:33.140Z level=INFO msg="checker: query complete" resolver=Google latency_ms=12
+time=2026-11-25T15:43:34.355-06:00 level=DEBUG msg="cmd: logging configured" level=DEBUG
+time=2026-11-25T15:43:34.355-06:00 level=DEBUG msg="cmd: flags parsed" record_type=A workers=20 no_tui=false json=false verbose=true
+time=2026-11-25T15:43:34.355-06:00 level=INFO msg="cmd: domain validated" domain=example.com
 ```
 
 ### Print Version
 
 ```bash
 sonar --version
-# Output: sonar v0.1.0 (commit abc1234, built 2024-03-15T14:20:00Z, linux/amd64)
+# Output: sonar <version> (commit <short sha>, built <UTC build time>, <os>/<arch>)
 ```
+
+`make build` stamps the version, commit and build time from git. A plain `go build` or `go install` prints `dev` and `unknown` instead.
 
 ## Flag Reference
 
@@ -181,7 +168,7 @@ sonar --version
 |------|-------|------|---------|-------------|
 | `--type` | `-t` | string | `A` | DNS record type (A, AAAA, MX, CNAME, NS, TXT, SOA, PTR) |
 | `--workers` | `-w` | int | `20` | Maximum number of concurrent DNS queries |
-| `--no-tui` | — | bool | `false` | Print results as plain text instead of interactive TUI |
+| `--no-tui` | — | bool | `false` | Print a plain-text table instead of the animated default view |
 | `--json` | — | bool | `false` | Output results as JSON (implies `--no-tui`) |
 | `--verbose` | `-v` | bool | `false` | Enable debug-level logging to stderr |
 | `--version` | — | bool | `false` | Print version information and exit |
@@ -206,9 +193,9 @@ Sonar queries 54 public DNS resolvers across 8 geographic regions:
 | Continent | Region | Resolvers | Examples |
 |-----------|--------|-----------|----------|
 | **Global** | Anycast | 6 | Google Public DNS, Cloudflare, Quad9 |
-| **North America** | US + Canada | 14 | OpenDNS, Level3, Comodo, Neustar, CIRA |
+| **North America** | US + Canada | 12 | OpenDNS, Level3, Comodo, Neustar, CIRA |
 | **South America** | Brazil | 3 | Claro, CPS, EMBRATEL |
-| **Europe** | Germany, France, Denmark, Sweden, Luxembourg, Estonia | 13 | DNS.WATCH, Freifunk, FDN, UncensoredDNS, LibreDNS, Mullvad, dns0.eu |
+| **Europe** | Germany, France, Denmark, Sweden, Luxembourg, Estonia | 12 | DNS.WATCH, Freifunk, FDN, UncensoredDNS, LibreDNS, Mullvad, dns0.eu |
 | **Africa** | Kenya, South Africa, Nigeria | 3 | Liquid Telecom, Rain, MTN |
 | **Asia** | China, South Korea, Japan, Taiwan, Russia | 11 | AliDNS, 114DNS, KT, SK Broadband, IIJ, SoftBank, TWNIC |
 | **Middle East** | UAE, Turkey, Saudi Arabia | 3 | Etisalat, Turk Telekom, STC |
@@ -233,16 +220,13 @@ High-level DNS query execution. Takes a domain, record type, and resolver addres
 Orchestrates concurrent DNS propagation checks across multiple resolvers. Implements a worker pool pattern to control concurrency, aggregates results, and provides both streaming and blocking interfaces for results delivery.
 
 ### `internal/resolver`
-Curated list of 54 public DNS resolvers with geographic metadata (country, city, continent). Provides utilities for grouping resolvers by continent and filtering. Resolver list is immutable and initialized at package load time.
+Curated list of 54 public DNS resolvers with geographic metadata (country, city, continent). The list is built once at package load, and `All()` returns a copy of it.
 
 ### `internal/ui`
-Inline output model for interactive result display. Prints a banner with a spinner while queries run, then reveals results continent-by-continent with paced timing. All output is append-only and scrollable — no alternate screen buffer.
-
-### `internal/tui`
-Low-level terminal UI primitives: raw mode, key reading, cursor movement, and ANSI escape sequences. Provides cross-platform support (macOS + Linux) via build-tagged files.
+Inline output model for the default view. Prints a banner with a spinner while queries run, then reveals results continent-by-continent with paced timing. All output is append-only and scrollable — no alternate screen buffer.
 
 ### `internal/style`
-ANSI truecolor terminal styling. Provides color definitions, text effects (bold, dim), and render functions. Centralizes all color and style decisions.
+ANSI truecolor terminal styling. Provides color definitions, bold text, and render functions. Centralizes all color and style decisions.
 
 ### `internal/version`
 Build-time version metadata injection via `-ldflags`. Stores semantic version, commit SHA, and build timestamp. Provides formatting functions for CLI output.
@@ -304,14 +288,6 @@ go test ./internal/dns
 go test ./internal/query -v
 ```
 
-### Run Tests with Coverage
-
-```bash
-go test -cover ./...
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-```
-
 ### Lint Code
 
 ```bash
@@ -319,20 +295,6 @@ make lint
 ```
 
 Runs `go vet` across all packages.
-
-### Test Coverage
-
-The project maintains 99% code coverage across all packages:
-- `internal/dns` — DNS protocol parsing and wire format
-- `internal/query` — DNS query execution and timeout handling
-- `internal/checker` — Concurrent result aggregation
-- `internal/resolver` — Resolver list and filtering
-- `internal/ui` — TUI state and rendering
-- `internal/tui` — Terminal control primitives
-- `internal/style` — Color and styling
-- `cmd` — Flag parsing and output formatting
-
-Each package has a corresponding `*_test.go` file with unit tests. Tests use the Go standard library `testing` package and do not depend on external test frameworks.
 
 ## JSON Output Schema
 
@@ -345,8 +307,8 @@ The `--json` output is a single JSON object with these fields:
   "domain": "string",           // The queried domain (e.g. "example.com")
   "record_type": "string",      // The DNS record type (e.g. "A", "AAAA", "MX")
   "timestamp": "string",        // ISO 8601 UTC timestamp of query execution
-  "propagation_pct": "number",  // Percentage of resolvers returning same record set (0-100)
-  "consensus": ["string"],      // Majority-agreed record set (empty if no consensus)
+  "propagation_pct": "number",  // Percentage of all resolvers returning the most common record set (0-100)
+  "consensus": ["string"],      // Record set returned by more than half of all resolvers (null if none)
   "results": [...]              // Per-resolver results array
 }
 ```
@@ -373,15 +335,15 @@ Each element in the `results` array has:
 
 **Propagation percentage** is calculated as:
 ```
-(count of resolvers with majority record set) / (total queries) * 100
+(resolvers returning the most common record set) / (all resolvers queried) * 100
 ```
 
-**Consensus** (majority record set) is the set of records returned by > 50% of successful resolvers. Record sets are compared after normalization (sorted, deduplicated). If no majority exists, consensus is an empty array.
+**Consensus** is the most common record set when more than half of all resolvers queried returned it; timeouts and errors count toward the total. Record sets are compared after sorting, and the consensus is listed sorted. Every output uses this rule: if no set reaches a majority, `consensus` is `null`, `--no-tui` prints `none`, and the default view shows `—` and marks no row ✓.
 
 **Query status**:
-- `success` — resolver returned a valid DNS response
+- `success` — resolver answered NOERROR, or NXDOMAIN (an empty answer)
 - `timeout` — query did not complete within 5 seconds
-- `error` — network error or protocol failure
+- `error` — network error, protocol failure, or a failure code from the resolver (SERVFAIL, REFUSED, FORMERR, NOTIMP)
 
 ## How It Works
 
@@ -417,6 +379,7 @@ Each query has a 5-second timeout enforced by the context and UDP dialer. If a r
 Query errors are classified as:
 - **Network errors** — connection refused, host unreachable, etc.
 - **Protocol errors** — malformed response, parse failures
+- **Resolver failures** — the resolver answered SERVFAIL, REFUSED, FORMERR or NOTIMP, shown as `dns: SERVFAIL` and so on
 - **Timeouts** — no response within 5 seconds
 
 All errors are logged and included in the results with a status and error message.

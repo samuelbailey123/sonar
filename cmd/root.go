@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"strings"
@@ -29,7 +30,7 @@ import (
 // All other styles are sourced from pre-defined package-level variables in
 // the style package so that color choices remain centralised.
 var (
-	styleHeader = style.New().Bold(true).Foreground("12")
+	styleHeader  = style.New().Bold(true).Foreground("12")
 	styleSuccess = style.Green
 	styleFailure = style.Red
 	styleDim     = style.DimGray
@@ -101,7 +102,7 @@ func Execute() error {
 	fs.BoolVar(&showVersion, "version", false, "print version information and exit")
 
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: sonar <domain> [flags]")
+		fmt.Fprintln(os.Stderr, "Usage: sonar [flags] <domain>")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Check DNS propagation for a domain across public resolvers worldwide.")
 		fmt.Fprintln(os.Stderr)
@@ -251,7 +252,7 @@ func runJSON(cfg checker.Config) error {
 
 	slog.Info("cmd: all queries complete", slog.Int("result_count", len(results)))
 
-	pct, consensus := propagationStats(results)
+	pct, consensus, _ := checker.PropagationStats(results)
 
 	out := jsonOutput{
 		Domain:         cfg.Domain,
@@ -325,11 +326,11 @@ func runPlain(cfg checker.Config) error {
 
 	fmt.Println()
 
-	pct, consensus := propagationStats(all)
+	pct, consensus, _ := checker.PropagationStats(all)
 
 	fmt.Printf("Propagation: %s (%d/%d resolvers agree)\n",
 		styleBold.Render(fmt.Sprintf("%.0f%%", pct)),
-		int(pct/100*float64(len(all))),
+		int(math.Round(pct/100*float64(len(all)))),
 		len(all),
 	)
 
@@ -357,29 +358,28 @@ func printRow(r query.Result) {
 
 	location := locationString(r.Resolver)
 
-	var statusStr string
-	var resultStr string
+	var statusStyle, resultStyle style.Style
+	var statusText, resultText string
 
 	switch r.Status {
 	case query.Success:
-		statusStr = styleSuccess.Render("✓")
+		statusStyle, statusText = styleSuccess, "✓"
 		if len(r.Records) > 0 {
-			resultStr = shortRecord(r.Records[0])
+			resultText = shortRecord(r.Records[0])
 			if len(r.Records) > 1 {
-				resultStr += fmt.Sprintf(" +%d", len(r.Records)-1)
+				resultText += fmt.Sprintf(" +%d", len(r.Records)-1)
 			}
 		} else {
-			resultStr = styleDim.Render("NODATA")
+			resultStyle, resultText = styleDim, "NODATA"
 		}
 	case query.Timeout:
-		statusStr = styleFailure.Render("T")
-		resultStr = styleFailure.Render("timeout")
+		statusStyle, statusText = styleFailure, "T"
+		resultStyle, resultText = styleFailure, "timeout"
 	default:
-		statusStr = styleFailure.Render("✗")
+		statusStyle, statusText = styleFailure, "✗"
+		resultStyle, resultText = styleFailure, "error"
 		if r.Error != nil {
-			resultStr = styleFailure.Render(shortError(r.Error.Error()))
-		} else {
-			resultStr = styleFailure.Render("error")
+			resultText = r.Error.Error()
 		}
 	}
 
@@ -388,74 +388,13 @@ func printRow(r query.Result) {
 		latencyStr = styleDim.Render(latencyStr)
 	}
 
-	fmt.Printf("%-28s %-24s %-8s %-28s %s\n",
+	fmt.Printf("%-28s %-24s %s %s %s\n",
 		truncate(r.Resolver.Name, 27),
 		truncate(location, 23),
-		statusStr,
-		truncate(resultStr, 27),
+		statusStyle.Render(fmt.Sprintf("%-8s", statusText)),
+		resultStyle.Render(fmt.Sprintf("%-28s", truncate(resultText, 27))),
 		latencyStr,
 	)
-}
-
-// propagationStats computes the propagation percentage and the consensus
-// record set from a completed slice of results. Consensus is defined as the
-// record set returned by the strict majority (> 50%) of successful resolvers.
-// If no majority exists, consensus is nil.
-func propagationStats(results []query.Result) (pct float64, consensus []string) {
-	if len(results) == 0 {
-		slog.Debug("cmd: propagationStats called with empty results")
-		return 0, nil
-	}
-
-	// Count occurrences of each normalised record set.
-	type key = string
-	counts := make(map[key]int)
-	setOf := make(map[key][]string)
-	successes := 0
-
-	for _, r := range results {
-		if r.Status != query.Success {
-			continue
-		}
-		successes++
-		k := normaliseRecordSet(r.Records)
-		counts[k]++
-		setOf[k] = r.Records
-	}
-
-	slog.Debug("cmd: propagation stats computed",
-		slog.Int("total", len(results)),
-		slog.Int("successes", successes),
-		slog.Int("distinct_sets", len(counts)),
-	)
-
-	if successes == 0 {
-		return 0, nil
-	}
-
-	// Find the most common record set.
-	var bestKey key
-	bestCount := 0
-
-	for k, c := range counts {
-		if c > bestCount {
-			bestCount = c
-			bestKey = k
-		}
-	}
-
-	pct = float64(bestCount) / float64(len(results)) * 100
-
-	if bestCount > len(results)/2 {
-		consensus = setOf[bestKey]
-	}
-
-	slog.Info("cmd: propagation stats",
-		slog.Float64("pct", pct),
-		slog.Int("consensus_count", len(consensus)),
-	)
-
-	return pct, consensus
 }
 
 // toJSONResults converts a slice of query.Result values into the JSON-friendly
@@ -518,24 +457,6 @@ func locationString(r resolver.Resolver) string {
 	return r.Continent
 }
 
-// normaliseRecordSet produces a stable, canonical string key from a record
-// slice by sorting entries lexicographically and joining with a pipe separator.
-// This allows map lookups regardless of the order resolvers return records.
-func normaliseRecordSet(records []string) string {
-	if len(records) == 0 {
-		return ""
-	}
-	sorted := make([]string, len(records))
-	copy(sorted, records)
-	// Insertion sort is fine here: record sets are almost always < 10 entries.
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
-	return strings.Join(sorted, "|")
-}
-
 // shortRecord strips the full DNS wire-format prefix from a record string,
 // returning only the data portion for compact table display.
 func shortRecord(s string) string {
@@ -547,16 +468,6 @@ func shortRecord(s string) string {
 		return s
 	}
 	return parts[len(parts)-1]
-}
-
-// shortError truncates an error string to a display-friendly length so that
-// long network error messages do not blow out the table column width.
-func shortError(s string) string {
-	const maxLen = 40
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-1] + "…"
 }
 
 // truncate returns s with any characters beyond maxLen replaced by a single

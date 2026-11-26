@@ -1,6 +1,7 @@
 sonar
 *.exe
-coverage.out
-coverage.html
 .DS_Store
 .claude/
+.scratch/
+*-plan.md
+*-brainstorm.md

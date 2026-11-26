@@ -1,8 +1,3 @@
-// Package ui provides the inline rendering model for the sonar DNS propagation
-// checker. It prints output directly to the terminal's main scroll buffer,
-// using ANSI cursor-movement sequences to update individual resolver rows
-// in-place as results stream in. No alternate screen buffer or raw mode is
-// used, so the user can scroll up freely and interrupt with Ctrl+C at any time.
 package ui
 
 import (
@@ -30,14 +25,7 @@ var output io.Writer = os.Stdout
 
 // ─── ANSI escape sequences ────────────────────────────────────────────────────
 
-const (
-	// escUp moves the cursor up N lines; the %d placeholder is the line count.
-	escUp = "\x1b[%dA"
-	// escClearLine erases the entire current line without moving the cursor.
-	escClearLine = "\x1b[2K"
-	// escDown moves the cursor down N lines; the %d placeholder is the line count.
-	escDown = "\x1b[%dB"
-)
+const escClearLine = "\x1b[2K"
 
 // ─── Spinner frames ───────────────────────────────────────────────────────────
 
@@ -93,24 +81,13 @@ func banner() string {
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 
-// Model is the top-level rendering model for the sonar DNS propagation checker.
-// It holds all display state under a mutex so that the background streaming
-// goroutine and the output helpers can safely share it.
-//
-// Run() uses an append-only output strategy: it prints the banner and column
-// headers once, then appends each completed resolver row as results arrive.
-// Only a single status line at the bottom is updated in-place (1 line up)
-// to show a spinner and progress counter. This avoids ANSI cursor-up issues
-// when the output is taller than the terminal viewport.
 type Model struct {
 	mu         sync.Mutex
-	outputMu   sync.Mutex // serialises all writes to output
+	outputMu   sync.Mutex
 	domain     string
 	recordType string
 	resolvers  []resolver.Resolver
-	results    map[string]query.Result // keyed by resolver IP
-	consensus  []string
-	done       bool
+	results    map[string]query.Result
 	startTime  time.Time
 	checker    *checker.Checker
 }
@@ -130,7 +107,7 @@ func New(domain string, recordType string, resolvers []resolver.Resolver, chk *c
 		results:    make(map[string]query.Result, len(resolvers)),
 		checker:    chk,
 		startTime:  time.Now(),
-}
+	}
 }
 
 // Run collects all DNS results first, then presents them continent-by-continent
@@ -163,20 +140,14 @@ func (m *Model) Run() error {
 
 	resultCh, _ := m.checker.Stream(ctx)
 
-	// Collect all results in the background.
 	doneCh := make(chan struct{})
 	go func() {
 		defer close(doneCh)
 		for result := range resultCh {
 			m.mu.Lock()
 			m.results[result.Resolver.IP] = result
-			m.consensus = checker.ConsensusRecords(resultsSlice(m.results))
 			m.mu.Unlock()
 		}
-		m.mu.Lock()
-		m.done = true
-		m.consensus = checker.ConsensusRecords(resultsSlice(m.results))
-		m.mu.Unlock()
 	}()
 
 	// Animate the spinner while waiting.
@@ -198,14 +169,13 @@ reveal:
 	// Clear the spinner line.
 	m.clearStatusLine()
 
-	// Progressive reveal: print results grouped by continent with pacing.
 	m.mu.Lock()
-	consensus := m.consensus
 	results := make(map[string]query.Result, len(m.results))
 	for k, v := range m.results {
 		results[k] = v
 	}
 	m.mu.Unlock()
+	_, consensus, majority := checker.PropagationStats(resultsSlice(results))
 
 	grouped := groupByContinent(m.resolvers)
 	continents := orderedContinents(grouped)
@@ -221,7 +191,7 @@ reveal:
 		// Print each resolver row with a small delay.
 		for _, r := range grouped[continent] {
 			result, hasResult := results[r.IP]
-			row := renderRow(r, result, hasResult, consensus)
+			row := renderRow(r, result, hasResult, consensus, majority)
 			fmt.Fprintln(output, row)
 			time.Sleep(rowDelay)
 		}
@@ -232,38 +202,6 @@ reveal:
 
 	slog.Info("ui.Model.Run: output complete")
 	return nil
-}
-
-// streamResults drains resultCh, updating model state under the mutex after
-// each result and calling updateRow to repaint that resolver's line in-place.
-// When the channel is closed it marks the model as done and computes the final
-// consensus.
-//
-// Accepting the channel as a parameter rather than opening it internally makes
-// this method testable without a real checker or a terminal.
-func (m *Model) streamResults(resultCh <-chan query.Result) {
-	slog.Info("ui.Model.streamResults: starting result stream")
-
-	for result := range resultCh {
-		slog.Debug("ui.Model.streamResults: result received",
-			slog.String("resolver_ip", result.Resolver.IP),
-			slog.String("resolver_name", result.Resolver.Name),
-			slog.String("status", result.Status.String()),
-			slog.Duration("latency", result.Latency),
-		)
-
-		m.mu.Lock()
-		m.results[result.Resolver.IP] = result
-		m.consensus = checker.ConsensusRecords(resultsSlice(m.results))
-		m.mu.Unlock()
-	}
-
-	slog.Info("ui.Model.streamResults: result channel closed — all resolvers finished")
-
-	m.mu.Lock()
-	m.done = true
-	m.consensus = checker.ConsensusRecords(resultsSlice(m.results))
-	m.mu.Unlock()
 }
 
 // ─── Inline output helpers (append-only) ─────────────────────────────────────
@@ -331,13 +269,9 @@ func (m *Model) printFooter() {
 
 	m.mu.Lock()
 	v := &viewState{
-		domain:     m.domain,
-		recordType: m.recordType,
-		resolvers:  m.resolvers,
-		results:    m.results,
-		consensus:  m.consensus,
-		done:       m.done,
-		startTime:  m.startTime,
+		resolvers: m.resolvers,
+		results:   m.results,
+		startTime: m.startTime,
 	}
 	m.mu.Unlock()
 
@@ -350,131 +284,10 @@ func (m *Model) printFooter() {
 	)
 }
 
-// ─── View (kept for test compatibility) ───────────────────────────────────────
-
-// View renders the full table as a string. It is retained for unit-test
-// compatibility — tests construct a Model and call View() to inspect rendering
-// output without needing a live terminal. It must not be called from Run().
-func (m *Model) View() string {
-	m.mu.Lock()
-	results := make(map[string]query.Result, len(m.results))
-	for k, v := range m.results {
-		results[k] = v
-	}
-	v := &viewState{
-		domain:     m.domain,
-		recordType: m.recordType,
-		resolvers:  m.resolvers,
-		results:    results,
-		consensus:  m.consensus,
-		done:       m.done,
-		startTime:  m.startTime,
-	}
-	m.mu.Unlock()
-
-	slog.Debug("ui.Model.View: rendering snapshot",
-		slog.Int("result_count", len(v.results)),
-		slog.Bool("done", v.done),
-	)
-
-	return v.render()
-}
-
-// ─── viewState ────────────────────────────────────────────────────────────────
-
-// viewState is an immutable snapshot of model fields used for a single render
-// pass. Keeping it separate from Model avoids holding the mutex during string
-// building and makes the rendering logic straightforward to test in isolation.
 type viewState struct {
-	domain     string
-	recordType string
-	resolvers  []resolver.Resolver
-	results    map[string]query.Result
-	consensus  []string
-	done       bool
-	startTime  time.Time
-}
-
-// render produces the complete screen content for this snapshot. It is used
-// by View() which is kept for test compatibility.
-func (v *viewState) render() string {
-	var sb strings.Builder
-
-	sb.WriteString(banner())
-	sb.WriteString("\n")
-	sb.WriteString(rowIndent)
-	sb.WriteString(styleDimGray.Render(fmt.Sprintf("DNS Propagation Checker  %s", version.Short())))
-	sb.WriteString("\n\n")
-	sb.WriteString(v.renderHeader())
-	sb.WriteString("\n\n")
-	sb.WriteString(v.renderTable())
-	sb.WriteString(v.renderFooter())
-	sb.WriteString("\n")
-	sb.WriteString(rowIndent)
-
-	if v.done {
-		elapsed := time.Since(v.startTime).Round(time.Millisecond)
-		sb.WriteString(styleDimGray.Render(fmt.Sprintf("completed in %s  •  press q to exit", elapsed)))
-	} else {
-		checked := len(v.results)
-		total := len(v.resolvers)
-		sb.WriteString(styleDimGray.Render(fmt.Sprintf("checking %d/%d  •  press q to exit", checked, total)))
-	}
-
-	sb.WriteString("\n")
-	return sb.String()
-}
-
-// ─── Header ───────────────────────────────────────────────────────────────────
-
-// renderHeader builds the top banner showing the domain name, record type, and
-// current propagation percentage.
-func (v *viewState) renderHeader() string {
-	pct := v.propagationPct()
-
-	parts := []string{
-		styleBold.Render("Domain:") + " " + styleCyan.Bold(true).Render(v.domain),
-		styleBold.Render("Type:") + " " + styleBold.Render(v.recordType),
-		styleBold.Render("Propagation:") + " " + colorForPct(pct).Bold(true).Render(fmt.Sprintf("%.0f%%", pct)),
-	}
-
-	status := ""
-	if v.done {
-		status = "  " + styleGreen.Render("complete")
-	} else {
-		status = "  " + styleDimGray.Render("checking...")
-	}
-
-	return rowIndent + strings.Join(parts, "   ") + status
-}
-
-// ─── Table ────────────────────────────────────────────────────────────────────
-
-// renderTable builds the full grouped-by-continent results table with aligned
-// fixed-width columns.
-func (v *viewState) renderTable() string {
-	grouped := groupByContinent(v.resolvers)
-
-	var sb strings.Builder
-	sb.WriteString(renderColumnHeaders())
-	sb.WriteString("\n")
-	sb.WriteString(rowIndent)
-	sb.WriteString(styleDimGray.Render(strings.Repeat("─", totalTableWidth())))
-	sb.WriteString("\n")
-
-	for _, continent := range orderedContinents(grouped) {
-		sb.WriteString(rowIndent)
-		sb.WriteString(styleContinent.Render(continent))
-		sb.WriteString("\n")
-
-		for _, r := range grouped[continent] {
-			result, hasResult := v.results[r.IP]
-			sb.WriteString(renderRow(r, result, hasResult, v.consensus))
-			sb.WriteString("\n")
-		}
-	}
-
-	return sb.String()
+	resolvers []resolver.Resolver
+	results   map[string]query.Result
+	startTime time.Time
 }
 
 // renderColumnHeaders returns the formatted column header row string.
@@ -489,10 +302,9 @@ func renderColumnHeaders() string {
 	return rowIndent + strings.Join(cols, colSep)
 }
 
-
 // renderRow produces a single formatted table row for one resolver. It uses
 // the live result if one has arrived, or a pending placeholder otherwise.
-func renderRow(r resolver.Resolver, result query.Result, hasResult bool, consensus []string) string {
+func renderRow(r resolver.Resolver, result query.Result, hasResult bool, consensus []string, majority bool) string {
 	nameCell := padVisible(truncate(r.Name, colWidthName), colWidthName)
 	locCell := padVisible(truncate(formatLocation(r), colWidthLocation), colWidthLocation)
 
@@ -520,7 +332,7 @@ func renderRow(r resolver.Resolver, result query.Result, hasResult bool, consens
 
 	default:
 		answer := formatAnswer(result.Records)
-		if matchesConsensus(result.Records, consensus) {
+		if majority && matchesConsensus(result.Records, consensus) {
 			statusCell = padVisible(styleGreen.Render("✓"), colWidthStatus)
 			answerCell = padVisible(styleGreen.Render(truncate(answer, colWidthAnswer)), colWidthAnswer)
 		} else {
@@ -535,16 +347,14 @@ func renderRow(r resolver.Resolver, result query.Result, hasResult bool, consens
 
 // ─── Footer ───────────────────────────────────────────────────────────────────
 
-// renderFooter builds the summary bar showing checked count, consensus answer,
-// and overall propagation percentage.
 func (v *viewState) renderFooter() string {
 	total := len(v.resolvers)
 	checked := len(v.results)
-	pct := v.propagationPct()
+	pct, consensus, _ := checker.PropagationStats(resultsSlice(v.results))
 
 	consensusStr := "—"
-	if len(v.consensus) > 0 {
-		consensusStr = truncate(formatAnswer(v.consensus), 48)
+	if len(consensus) > 0 {
+		consensusStr = truncate(formatAnswer(consensus), 48)
 	}
 
 	divider := rowIndent + styleDimGray.Render(strings.Repeat("─", totalTableWidth())) + "\n"
@@ -561,24 +371,6 @@ func (v *viewState) renderFooter() string {
 
 // ─── Propagation helpers ──────────────────────────────────────────────────────
 
-// propagationPct returns the percentage of all configured resolvers whose
-// answer matches the consensus. Resolvers that have not responded yet count
-// as non-matching so the value grows monotonically as results arrive.
-func (v *viewState) propagationPct() float64 {
-	if len(v.resolvers) == 0 || len(v.consensus) == 0 {
-		return 0
-	}
-	matching := 0
-	for _, r := range v.results {
-		if r.Status == query.Success && matchesConsensus(r.Records, v.consensus) {
-			matching++
-		}
-	}
-	return float64(matching) / float64(len(v.resolvers)) * 100
-}
-
-// matchesConsensus reports whether records (after sorting) equal the
-// consensus slice (which is already sorted by ConsensusRecords).
 func matchesConsensus(records, consensus []string) bool {
 	if len(records) != len(consensus) {
 		return false

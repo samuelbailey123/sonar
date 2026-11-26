@@ -1,5 +1,3 @@
-// Package resolver provides a curated list of public DNS resolvers with
-// geographic metadata and utility functions for grouping and filtering them.
 package resolver
 
 import (
@@ -453,35 +451,4 @@ func All() []Resolver {
 	out := make([]Resolver, len(all))
 	copy(out, all)
 	return out
-}
-
-// ByContinent groups the provided resolvers by their Continent field and
-// returns a map keyed by continent name. Resolvers with an empty Continent
-// field are grouped under the key "Unknown".
-func ByContinent(resolvers []Resolver) map[string][]Resolver {
-	slog.Debug("resolver: ByContinent() called", slog.Int("input_count", len(resolvers)))
-
-	groups := make(map[string][]Resolver)
-
-	for _, r := range resolvers {
-		key := r.Continent
-		if key == "" {
-			key = "Unknown"
-		}
-		groups[key] = append(groups[key], r)
-	}
-
-	for continent, group := range groups {
-		slog.Debug("resolver: continent group built",
-			slog.String("continent", continent),
-			slog.Int("count", len(group)),
-		)
-	}
-
-	slog.Info("resolver: ByContinent() complete",
-		slog.Int("continents", len(groups)),
-		slog.Int("total_resolvers", len(resolvers)),
-	)
-
-	return groups
 }

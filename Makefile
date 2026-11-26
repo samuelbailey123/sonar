@@ -8,7 +8,7 @@ LDFLAGS := -X github.com/samuelbailey123/sonar/internal/version.Version=$(VERSIO
 
 BIN := sonar
 
-.PHONY: build install test lint clean coverage check release
+.PHONY: build install test lint clean check release
 
 ## build: compile the sonar binary with version metadata
 build:
@@ -30,16 +30,10 @@ lint:
 clean:
 	rm -f $(BIN)
 
-## coverage: generate HTML coverage report and open it in the browser
-coverage:
-	go test -race -count=1 -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out -o coverage.html
-	open coverage.html
-
 ## check: run vet and tests (CI-equivalent local gate)
 check:
 	go vet ./...
-	go test -short -race -count=1 -coverprofile=coverage.out ./...
+	go test -short -race -count=1 ./...
 
 ## release: build a local snapshot release via goreleaser (no publish)
 release:

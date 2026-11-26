@@ -171,12 +171,12 @@ func TestFullTableDriven(t *testing.T) {
 	platform := runtime.GOOS + "/" + runtime.GOARCH
 
 	cases := []struct {
-		name        string
-		version     string
-		commit      string
-		date        string
-		wantFull    string
-		wantShort   string
+		name      string
+		version   string
+		commit    string
+		date      string
+		wantFull  string
+		wantShort string
 	}{
 		{
 			name:      "default values",
