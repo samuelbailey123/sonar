@@ -341,9 +341,9 @@ Each element in the `results` array has:
 **Consensus** is the most common record set when more than half of all resolvers queried returned it; timeouts and errors count toward the total. Record sets are compared after sorting, and the consensus is listed sorted. Every output uses this rule: if no set reaches a majority, `consensus` is `null`, `--no-tui` prints `none`, and the default view shows `—` and marks no row ✓.
 
 **Query status**:
-- `success` — resolver returned a valid DNS response
+- `success` — resolver answered NOERROR, or NXDOMAIN (an empty answer)
 - `timeout` — query did not complete within 5 seconds
-- `error` — network error or protocol failure
+- `error` — network error, protocol failure, or a failure code from the resolver (SERVFAIL, REFUSED, FORMERR, NOTIMP)
 
 ## How It Works
 
@@ -379,6 +379,7 @@ Each query has a 5-second timeout enforced by the context and UDP dialer. If a r
 Query errors are classified as:
 - **Network errors** — connection refused, host unreachable, etc.
 - **Protocol errors** — malformed response, parse failures
+- **Resolver failures** — the resolver answered SERVFAIL, REFUSED, FORMERR or NOTIMP, shown as `dns: SERVFAIL` and so on
 - **Timeouts** — no response within 5 seconds
 
 All errors are logged and included in the results with a status and error message.

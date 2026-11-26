@@ -86,77 +86,6 @@ func TestTruncate(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// shortError
-// ─────────────────────────────────────────────────────────────────────────────
-
-func TestShortError(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "short error unchanged",
-			input: "connection refused",
-			want:  "connection refused",
-		},
-		{
-			name:  "exactly 40 chars unchanged",
-			input: strings.Repeat("a", 40),
-			want:  strings.Repeat("a", 40),
-		},
-		{
-			name:  "41 chars gets truncated with ellipsis",
-			input: strings.Repeat("a", 41),
-			want:  strings.Repeat("a", 39) + "…",
-		},
-		{
-			name:  "long network error truncated",
-			input: "read tcp 192.168.1.1:12345->8.8.8.8:53: i/o timeout waiting for DNS response",
-			want:  "read tcp 192.168.1.1:12345->8.8.8.8:53:…",
-		},
-		{
-			name:  "empty string",
-			input: "",
-			want:  "",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := shortError(tc.input)
-			if got != tc.want {
-				t.Errorf("shortError(%q) = %q; want %q", tc.input, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestShortError_MaxLenBoundary(t *testing.T) {
-	t.Parallel()
-
-	// Verify the constant is 40 by checking boundary behaviour precisely.
-	const maxLen = 40
-
-	exact := strings.Repeat("x", maxLen)
-	if got := shortError(exact); got != exact {
-		t.Errorf("shortError(%d chars) should be unchanged; got %q", maxLen, got)
-	}
-
-	overOne := strings.Repeat("x", maxLen+1)
-	got := shortError(overOne)
-	if got == overOne {
-		t.Error("shortError should truncate a string one char over the limit")
-	}
-	if !strings.HasSuffix(got, "…") {
-		t.Errorf("shortError result should end with ellipsis; got %q", got)
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // shortRecord
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1156,10 +1085,6 @@ func TestPrintRow_Error_WithMessage(t *testing.T) {
 
 	out := captureStdout(t, func() { printRow(r) })
 
-	// The error string "connection refused" (18 chars) is first styled with
-	// ANSI codes by styleFailure.Render, making the raw byte length exceed the
-	// 27-char column truncation applied inside printRow. The visible text is
-	// truncated but at least the first few letters must appear.
 	if !strings.Contains(out, "connectio") {
 		t.Errorf("printRow(Error) output missing error message prefix; got: %q", out)
 	}

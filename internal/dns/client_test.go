@@ -470,7 +470,7 @@ func TestParseResponse_TooShort(t *testing.T) {
 	}
 }
 
-func TestParseResponse_NonZeroRCODE(t *testing.T) {
+func TestParseResponse_NXDOMAIN(t *testing.T) {
 	t.Parallel()
 
 	// RCODE = 3 (NXDOMAIN), no answers

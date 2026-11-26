@@ -358,29 +358,28 @@ func printRow(r query.Result) {
 
 	location := locationString(r.Resolver)
 
-	var statusStr string
-	var resultStr string
+	var statusStyle, resultStyle style.Style
+	var statusText, resultText string
 
 	switch r.Status {
 	case query.Success:
-		statusStr = styleSuccess.Render("✓")
+		statusStyle, statusText = styleSuccess, "✓"
 		if len(r.Records) > 0 {
-			resultStr = shortRecord(r.Records[0])
+			resultText = shortRecord(r.Records[0])
 			if len(r.Records) > 1 {
-				resultStr += fmt.Sprintf(" +%d", len(r.Records)-1)
+				resultText += fmt.Sprintf(" +%d", len(r.Records)-1)
 			}
 		} else {
-			resultStr = styleDim.Render("NODATA")
+			resultStyle, resultText = styleDim, "NODATA"
 		}
 	case query.Timeout:
-		statusStr = styleFailure.Render("T")
-		resultStr = styleFailure.Render("timeout")
+		statusStyle, statusText = styleFailure, "T"
+		resultStyle, resultText = styleFailure, "timeout"
 	default:
-		statusStr = styleFailure.Render("✗")
+		statusStyle, statusText = styleFailure, "✗"
+		resultStyle, resultText = styleFailure, "error"
 		if r.Error != nil {
-			resultStr = styleFailure.Render(shortError(r.Error.Error()))
-		} else {
-			resultStr = styleFailure.Render("error")
+			resultText = r.Error.Error()
 		}
 	}
 
@@ -389,11 +388,11 @@ func printRow(r query.Result) {
 		latencyStr = styleDim.Render(latencyStr)
 	}
 
-	fmt.Printf("%-28s %-24s %-8s %-28s %s\n",
+	fmt.Printf("%-28s %-24s %s %s %s\n",
 		truncate(r.Resolver.Name, 27),
 		truncate(location, 23),
-		statusStr,
-		truncate(resultStr, 27),
+		statusStyle.Render(fmt.Sprintf("%-8s", statusText)),
+		resultStyle.Render(fmt.Sprintf("%-28s", truncate(resultText, 27))),
 		latencyStr,
 	)
 }
@@ -469,16 +468,6 @@ func shortRecord(s string) string {
 		return s
 	}
 	return parts[len(parts)-1]
-}
-
-// shortError truncates an error string to a display-friendly length so that
-// long network error messages do not blow out the table column width.
-func shortError(s string) string {
-	const maxLen = 40
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-1] + "…"
 }
 
 // truncate returns s with any characters beyond maxLen replaced by a single
